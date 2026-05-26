@@ -10,19 +10,19 @@
 
 Sistema CLI em Python com SQLite, focado em **rigidez de regras**, **imutabilidade de dados** e **rastreabilidade total** de todas as ações realizadas na portaria de condomínios ou empresas.
 
-## Estrutura do Código
+### Estrutura do Projeto
 
-portaria/
-├── main.py                  # Ponto de entrada — interface CLI
-├── db/
-│   └── database.py          # Schema SQLite + conexão + triggers de imutabilidade
-├── modules/
-│   ├── auth.py              # Autenticação, operadores e moradores
-│   ├── acesso.py            # Pilar 1: Controle de Acesso Inteligente
-│   ├── encomendas.py        # Pilar 2: Módulo de Encomendas
-│   └── auditoria.py         # Pilar 3: Trilha de Auditoria (append-only)
-└── utils/
-    └── cli.py               # Helpers de terminal: cores, menus, tabelas
+    portaria/
+    ├── main.py                  # Ponto de entrada — interface CLI
+    ├── db/
+    │   └── database.py          # Schema SQLite + conexão + triggers de imutabilidade
+    ├── modules/
+    │   ├── auth.py              # Autenticação, operadores e moradores
+    │   ├── acesso.py            # Pilar 1: Controle de Acesso Inteligente
+    │   ├── encomendas.py        # Pilar 2: Módulo de Encomendas
+    │   └── auditoria.py         # Pilar 3: Trilha de Auditoria (append-only)
+    └── utils/
+        └── cli.py               # Helpers de terminal: cores, menus, tabelas
 
 ### Os 3 Pilares
 
@@ -40,29 +40,19 @@ portaria/
 
 #### 3 — Trilha de Auditoria
 - Tabela `auditoria` com registros **append-only** — nunca sofre UPDATE ou DELETE
-- Imutabilidade garantida por **triggers SQL diretamente no banco**:
-```sql
--- Tentativa de UPDATE resulta em:
-VIOLAÇÃO: registros de auditoria são imutáveis.
-
--- Tentativa de DELETE resulta em:
-VIOLAÇÃO: registros de auditoria não podem ser excluídos.
-```
+- Imutabilidade garantida por **triggers SQL diretamente no banco**
 - Cada evento armazena: ação, módulo, operador, data/hora e **payload em JSON**
 
 ### Como Executar
 
-```bash
-# Requer apenas Python 3.10+ — sem dependências externas
-python main.py
-```
+    python main.py
 
 ### Credenciais de Demonstração
 
-| Perfil   | Login   | Senha          |
-|----------|---------|----------------|
-| Admin    | `admin` | `admin123`     |
-| Porteiro | `joao`  | `porteiro123`  |
+| Perfil   | Login   | Senha         |
+|----------|---------|---------------|
+| Admin    | `admin` | `admin123`    |
+| Porteiro | `joao`  | `porteiro123` |
 
 ### Moradores de Exemplo
 
@@ -102,17 +92,17 @@ A Python CLI system using SQLite, focused on **strict business rules**, **data i
 
 ### Project Structure
 
-portaria/
-├── main.py                  # Entry point — CLI interface
-├── db/
-│   └── database.py          # SQLite schema + connection + immutability triggers
-├── modules/
-│   ├── auth.py              # Authentication, operators and residents
-│   ├── acesso.py            # Pillar 1: Intelligent Access Control
-│   ├── encomendas.py        # Pillar 2: Package Management Module
-│   └── auditoria.py         # Pillar 3: Audit Trail (append-only)
-└── utils/
-└── cli.py               # Terminal helpers: colors, menus, tables
+    portaria/
+    ├── main.py                  # Entry point — CLI interface
+    ├── db/
+    │   └── database.py          # SQLite schema + connection + immutability triggers
+    ├── modules/
+    │   ├── auth.py              # Authentication, operators and residents
+    │   ├── acesso.py            # Pillar 1: Intelligent Access Control
+    │   ├── encomendas.py        # Pillar 2: Package Management Module
+    │   └── auditoria.py         # Pillar 3: Audit Trail (append-only)
+    └── utils/
+        └── cli.py               # Terminal helpers: colors, menus, tables
 
 ### The 3 Pillars
 
@@ -130,29 +120,19 @@ portaria/
 
 #### 3 — Audit Trail
 - The `auditoria` table is **append-only** — no UPDATE or DELETE ever allowed
-- Immutability enforced by **SQL triggers at the database level**:
-```sql
--- Any UPDATE attempt results in:
-VIOLATION: audit records are immutable.
-
--- Any DELETE attempt results in:
-VIOLATION: audit records cannot be deleted.
-```
+- Immutability enforced by **SQL triggers at the database level**
 - Each event stores: action, module, operator, timestamp, and a **JSON payload**
 
 ### How to Run
 
-```bash
-# Requires only Python 3.10+ — no external dependencies
-python main.py
-```
+    python main.py
 
 ### Demo Credentials
 
-| Role     | Login   | Password       |
-|----------|---------|----------------|
-| Admin    | `admin` | `admin123`     |
-| Doorman  | `joao`  | `porteiro123`  |
+| Role    | Login   | Password      |
+|---------|---------|---------------|
+| Admin   | `admin` | `admin123`    |
+| Doorman | `joao`  | `porteiro123` |
 
 ### Sample Residents
 
