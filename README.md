@@ -11,7 +11,6 @@
 Sistema CLI em Python com SQLite, focado em **rigidez de regras**, **imutabilidade de dados** e **rastreabilidade total** de todas as ações realizadas na portaria de condomínios ou empresas.
 
 ### Estrutura do Projeto
-
 portaria/
 ├── main.py                  # Ponto de entrada — interface CLI
 ├── db/
@@ -22,7 +21,7 @@ portaria/
 │   ├── encomendas.py        # Pilar 2: Módulo de Encomendas
 │   └── auditoria.py         # Pilar 3: Trilha de Auditoria (append-only)
 └── utils/
-└── cli.py               # Helpers de terminal: cores, menus, tabelas
+    └── cli.py               # Helpers de terminal: cores, menus, tabelas
 
 ### Os 3 Pilares
 
