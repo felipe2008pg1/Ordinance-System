@@ -30,10 +30,10 @@ A Python CLI system using SQLite, focused on **strict business rules**, **data i
 - Full flow: `received → notified → picked up`
 - Automatic notification triggered upon registering a package
 - Pickup requires the **resident's confirmation PIN** — mandatory and non-bypassable
-- Failed PIN attempts generate a `RETIRADA_SENHA_INVALIDA` audit event
+- Failed PIN attempts generate a `WITHDRAWAL_INVALID_PASSWORD` audit event
 
 #### 3 — Audit Trail
-- The `auditoria` table is **append-only** — no UPDATE or DELETE ever allowed
+- The `audit` table is **append-only** — no UPDATE or DELETE ever allowed
 - Immutability enforced by **SQL triggers at the database level**
 - Each event stores: action, module, operator, timestamp, and a **JSON payload**
 
