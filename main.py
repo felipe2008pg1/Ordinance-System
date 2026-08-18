@@ -1,716 +1,1424 @@
 """
-Interface CLI principal do Sistema de Controle, Logística e Auditoria para Portarias.
-Ponto de entrada: python main.py
+Main CLI interface for the Gatehouse Control, Logistics, and Audit System.
+Entry point: python main.py
 """
 
 import sys
 import os
 
-# Garante que o diretório raiz do projeto esteja no path
+# Ensures that the project root directory is included in the path
 sys.path.insert(0, os.path.dirname(__file__))
 
 from db.database import init_db
-from modules import auth, acesso, encomendas, auditoria
+from modules import auth, access, packages, audit_log
 from utils.cli import (
-    C, limpar_tela, cabecalho, separador, pausar,
-    confirmar, pedir, menu, tabela, exibir_json_formatado, status_badge
+    C,
+    clear_screen,
+    header,
+    separator,
+    pause,
+    confirm,
+    prompt,
+    menu,
+    table,
+    display_formatted_json,
+    status_badge,
 )
 
-# Operador autenticado na sessão atual
-sessao: dict | None = None
+# Authenticated operator in the current session
+session: dict | None = None
 
 # ═══════════════════════════════════════════════════════════════════
 # LOGIN / LOGOUT
 # ═══════════════════════════════════════════════════════════════════
 
-def tela_login():
-    global sessao
-    limpar_tela()
-    cabecalho("Sistema de Portaria", "Controle · Logística · Auditoria")
+def login_screen():
+    global session
 
-    print(C.info("  Faça login para continuar.\n"))
-    login = pedir("Login")
-    senha = pedir("Senha", oculto=True)
+    clear_screen()
+    header(
+        "Gatehouse System",
+        "Control · Logistics · Audit",
+    )
 
-    operador = auth.autenticar(login, senha)
-    if operador:
-        sessao = operador
-        nome_op = operador["nome"]
-        perfil_op = operador["perfil"]
-        print(f"\n  {C.ok(f'Bem-vindo(a), {nome_op}! Perfil: {perfil_op}')}")
-        pausar()
-    else:
-        print(f"\n  {C.erro('Credenciais inválidas. Tente novamente.')}")
-        pausar()
+    print(C.info("  Log in to continue.\n"))
+    username = prompt("Username")
+    password = prompt("Password", hidden=True)
+    operator = auth.authenticate(username, password)
 
-# ═══════════════════════════════════════════════════════════════════
-# MENU PRINCIPAL
-# ═══════════════════════════════════════════════════════════════════
+    if operator:
+        session = operator
+        operator_name = operator["name"]
+        operator_role = operator["role"]
 
-def menu_principal():
-    opcoes_porteiro = [
-        "🚪  Controle de Acesso",
-        "📦  Módulo de Encomendas",
-        "📋  Trilha de Auditoria",
-        "🚪  Sair do Sistema",
-    ]
-    opcoes_admin = [
-        "🚪  Controle de Acesso",
-        "📦  Módulo de Encomendas",
-        "📋  Trilha de Auditoria",
-        "👥  Gerenciar Operadores",
-        "🏠  Gerenciar Moradores",
-        "🚪  Sair do Sistema",
-    ]
-
-    is_admin = sessao["perfil"] == "admin"
-    opcoes = opcoes_admin if is_admin else opcoes_porteiro
-
-    while True:
-        limpar_tela()
-        cabecalho(
-            "Menu Principal",
-            f"Operador: {sessao['nome']} ({sessao['perfil']})  |  {_hora_agora()}"
+        print(
+            f"\n  {C.ok(f"Welcome, {operator_name}! Role: {operator_role}")}"
         )
 
-        escolha = menu("Selecione o módulo", opcoes)
+        pause()
 
-        if escolha == -1 or opcoes[escolha if escolha >= 0 else 0].endswith("Sistema"):
-            if confirmar("Deseja realmente sair?"):
-                auditoria.registrar(
-                    acao="LOGOUT",
-                    modulo="sistema",
-                    payload={"login": sessao["login"]},
-                    operador_id=sessao["id"],
+    else:
+        print(
+            f"\n  {C.error("Invalid credentials. Please try again.")}"
+        )
+
+        pause()
+
+# ═══════════════════════════════════════════════════════════════════
+# MAIN MENU
+# ═══════════════════════════════════════════════════════════════════
+
+def main_menu():
+    doorman_options = [
+        "🚪  Access Control",
+        "📦  Package Management",
+        "📋  Audit Trail",
+        "🚪  Exit System",
+    ]
+
+    admin_options = [
+        "🚪  Access Control",
+        "📦  Package Management",
+        "📋  Audit Trail",
+        "👥  Manage Operators",
+        "🏠  Manage Residents",
+        "🚪  Exit System",
+    ]
+
+    is_admin = session["role"] == "admin"
+    options = admin_options if is_admin else doorman_options
+
+    while True:
+        clear_screen()
+
+        header(
+            "Main Menu",
+            f"Operator: {session['name']} "
+            f"({session['role']})  |  {_current_time()}",
+        )
+
+        choice = menu("Select a module", options)
+
+        if choice == -1 or options[
+            choice if choice >= 0 else 0
+        ].endswith("System"):
+
+            if confirm("Do you really want to exit?"):
+                audit_log.record(
+                    action="LOGOUT",
+                    module="system",
+                    payload={
+                        "username": session["username"],
+                    },
+                    operator_id=session["id"],
                 )
-                print(f"\n  {C.info('Sessão encerrada. Até logo!')}\n")
+
+                print(
+                    f"\n  {C.info('Session ended. Goodbye!')}\n"
+                )
+
                 sys.exit(0)
+
             continue
 
-        label = opcoes[escolha]
-        if "Acesso" in label:
-            menu_acesso()
-        elif "Encomenda" in label:
-            menu_encomendas()
-        elif "Auditoria" in label:
-            menu_auditoria()
-        elif "Operadores" in label and is_admin:
-            menu_operadores()
-        elif "Moradores" in label and is_admin:
-            menu_moradores()
-        elif "Sair" in label:
-            if confirmar("Deseja realmente sair?"):
-                print(f"\n  {C.info('Sessão encerrada. Até logo!')}\n")
+        label = options[choice]
+
+        if "Access" in label:
+            access_menu()
+
+        elif "Package" in label:
+            packages_menu()
+
+        elif "Audit" in label:
+            audit_menu()
+
+        elif "Operators" in label and is_admin:
+            operators_menu()
+
+        elif "Residents" in label and is_admin:
+            residents_menu()
+
+        elif "Exit" in label:
+            if confirm("Do you really want to exit?"):
+                print(
+                    f"\n  {C.info('Session ended. Goodbye!')}\n"
+                )
+
                 sys.exit(0)
 
-def _hora_agora():
+def _current_time():
     from datetime import datetime
-    return datetime.now().strftime("%d/%m/%Y %H:%M")
+
+    return datetime.now().strftime("%m/%d/%Y %H:%M")
 
 # ═══════════════════════════════════════════════════════════════════
-# MÓDULO DE ACESSO
+# ACCESS CONTROL MODULE
 # ═══════════════════════════════════════════════════════════════════
 
-def menu_acesso():
+def access_menu():
     while True:
-        limpar_tela()
-        cabecalho("Controle de Acesso", "Registro e validação de entradas/saídas")
+        clear_screen()
 
-        escolha = menu("Acesso", [
-            "Registrar nova entrada",
-            "Registrar saída",
-            "Ver entradas ativas",
-            "Histórico de visitas",
-            "─── Regras de Acesso ───",
-            "Cadastrar nova regra",
-            "Listar regras",
-        ])
+        header(
+            "Access Control",
+            "Registration and validation of entries/exits",
+        )
 
-        if escolha == -1:
+        choice = menu(
+            "Access",
+            [
+                "Register new entry",
+                "Register checkout",
+                "View active entries",
+                "Visit history",
+                "─── Access Rules ───",
+                "Create new rule",
+                "List rules",
+            ],
+        )
+
+        if choice == -1:
             break
-        elif escolha == 0:
-            _registrar_entrada()
-        elif escolha == 1:
-            _registrar_saida()
-        elif escolha == 2:
-            _listar_entradas_ativas()
-        elif escolha == 3:
-            _historico_visitas()
-        elif escolha == 5:
-            if sessao["perfil"] != "admin":
-                print(C.erro("  Apenas administradores podem cadastrar regras."))
-                pausar()
+
+        elif choice == 0:
+            _register_entry()
+
+        elif choice == 1:
+            _register_checkout()
+
+        elif choice == 2:
+            _list_active_entries()
+
+        elif choice == 3:
+            _visit_history()
+
+        elif choice == 5:
+            if session["role"] != "admin":
+                print(
+                    C.error(
+                        "  Only administrators can create access rules."
+                    )
+                )
+
+                pause()
+
             else:
-                _cadastrar_regra()
-        elif escolha == 6:
-            _listar_regras()
+                _create_rule()
 
-def _registrar_entrada():
-    limpar_tela()
-    cabecalho("Nova Entrada")
+        elif choice == 6:
+            _list_rules()
 
-    tipo = _escolher_tipo_visita()
-    if not tipo:
+def _register_entry():
+    clear_screen()
+    header("New Entry")
+
+    visitor_type = _choose_visit_type()
+
+    if not visitor_type:
         return
 
-    nome = pedir("Nome do visitante/prestador")
-    documento = pedir("Documento (CPF/RG)", obrigatorio=False)
-    unidade = pedir("Unidade destino (ex: 101, 202)")
+    visitor_name = prompt("Visitor/service provider name")
+    document = prompt(
+        "Document (CPF/ID)",
+        required=False,
+    )
+    unit = prompt("Destination unit (e.g. 101, 202)")
 
     print()
-    permitido, msg_previa = acesso.verificar_regras(tipo)
-    if not permitido:
-        print(f"  {C.aviso('ATENÇÃO: As regras indicam que este acesso será NEGADO.')}")
-        print(f"  {C.GRAY}{msg_previa}{C.RESET}")
-        if not confirmar("Deseja registrar mesmo assim (a negação será auditada)?"):
+
+    allowed, preview_message = access.check_rules(
+        visitor_type
+    )
+
+    if not allowed:
+        print(
+            f"  {C.warning('WARNING: The rules indicate that this access will be DENIED.')}"
+        )
+
+        print(
+            f"  {C.GRAY}{preview_message}{C.RESET}"
+        )
+
+        if not confirm(
+            "Do you want to register it anyway "
+            "(the denial will be audited)?"
+        ):
             return
 
-    resultado = acesso.registrar_visita(
-        nome_visitante=nome,
-        tipo=tipo,
-        unidade_destino=unidade,
-        operador_id=sessao["id"],
-        documento=documento,
+    result = access.register_visit(
+        visitor_name=visitor_name,
+        type=visitor_type,
+        destination_unit=unit,
+        operator_id=session["id"],
+        document=document,
     )
 
-    if resultado["ok"]:
-        print(f"\n  {C.ok(resultado['mensagem'])}")
-        print(f"  Protocolo de entrada: #{resultado['visita_id']}")
-    else:
-        print(f"\n  {C.erro(resultado['mensagem'])}")
-        print(f"  Registro de negação: #{resultado['visita_id']}")
-    pausar()
+    if result["ok"]:
+        print(
+            f"\n  {C.ok(result['message'])}"
+        )
 
-def _escolher_tipo_visita() -> str | None:
-    tipos = ["visitante", "prestador", "entregador"]
-    escolha = menu("Tipo de visitante", [t.capitalize() for t in tipos])
-    if escolha == -1:
+        print(
+            f"  Entry reference: #{result['visit_id']}"
+        )
+
+    else:
+        print(
+            f"\n  {C.error(result['message'])}"
+        )
+
+        print(
+            f"  Denial record: #{result['visit_id']}"
+        )
+
+    pause()
+
+def _choose_visit_type() -> str | None:
+    visitor_types = [
+        "visitor",
+        "service_provider",
+        "delivery",
+    ]
+
+    choice = menu(
+        "Visitor Type",
+        [
+            visitor_type.replace("_", " ").title()
+            for visitor_type in visitor_types
+        ],
+    )
+
+    if choice == -1:
         return None
-    return tipos[escolha]
 
-def _registrar_saida():
-    limpar_tela()
-    cabecalho("Registrar Saída")
+    return visitor_types[choice]
 
-    ativas = acesso.listar_visitas_ativas()
-    if not ativas:
-        print(C.info("  Nenhuma visita ativa no momento."))
-        pausar()
+def _register_checkout():
+    clear_screen()
+    header("Register Checkout")
+
+    active_visits = access.list_active_visits()
+
+    if not active_visits:
+        print(
+            C.info("  No active visits at the moment.")
+        )
+
+        pause()
         return
 
-    _exibir_tabela_visitas(ativas, mostrar_saida=False)
+    _display_visit_table(
+        active_visits,
+        show_checkout=False,
+    )
 
     try:
-        vid = int(pedir("ID da visita para registrar saída"))
+        visit_id = int(
+            prompt("Visit ID to register checkout")
+        )
+
     except ValueError:
-        print(C.erro("ID inválido."))
-        pausar()
+        print(
+            C.error("Invalid ID.")
+        )
+
+        pause()
         return
 
-    resultado = acesso.registrar_saida(vid, sessao["id"])
-    if resultado["ok"]:
-        print(f"\n  {C.ok(resultado['mensagem'])}")
+    result = access.register_checkout(
+        visit_id,
+        session["id"],
+    )
+
+    if result["ok"]:
+        print(
+            f"\n  {C.ok(result['message'])}"
+        )
+
     else:
-        print(f"\n  {C.erro(resultado['mensagem'])}")
-    pausar()
+        print(
+            f"\n  {C.error(result['message'])}"
+        )
 
-def _listar_entradas_ativas():
-    limpar_tela()
-    cabecalho("Entradas Ativas")
-    ativas = acesso.listar_visitas_ativas()
-    if not ativas:
-        print(C.info("  Nenhuma visita ativa no momento."))
+    pause()
+
+def _list_active_entries():
+    clear_screen()
+    header("Active Entries")
+    active_visits = access.list_active_visits()
+
+    if not active_visits:
+        print(
+            C.info("  No active visits at the moment.")
+        )
+
     else:
-        _exibir_tabela_visitas(ativas)
-    pausar()
+        _display_visit_table(active_visits)
 
-def _historico_visitas():
-    limpar_tela()
-    cabecalho("Histórico de Visitas", "Últimas 20 entradas")
-    visitas = acesso.listar_visitas_recentes(20)
-    if not visitas:
-        print(C.info("  Nenhuma visita registrada."))
+    pause()
+
+def _visit_history():
+    clear_screen()
+
+    header(
+        "Visit History",
+        "Last 20 entries",
+    )
+
+    visits = access.list_recent_visits(20)
+
+    if not visits:
+        print(
+            C.info("  No visits registered.")
+        )
+
     else:
-        _exibir_tabela_visitas(visitas)
-    pausar()
+        _display_visit_table(visits)
 
-def _exibir_tabela_visitas(visitas: list, mostrar_saida: bool = True):
-    colunas = ["ID", "Visitante", "Tipo", "Unidade", "Status", "Entrada"]
-    linhas = []
-    for v in visitas:
-        linhas.append([
-            v["id"],
-            v["nome_visitante"][:20],
-            v["tipo"],
-            v["unidade_destino"],
-            status_badge(v["status"]),
-            (v["entrada_em"] or "-")[:16],
-        ])
-    tabela(colunas, linhas, [4, 22, 10, 8, 18, 16])
+    pause()
 
-def _cadastrar_regra():
-    limpar_tela()
-    cabecalho("Cadastrar Regra de Acesso")
+def _display_visit_table(
+    visits: list,
+    show_checkout: bool = True,
+):
+    columns = [
+        "ID",
+        "Visitor",
+        "Type",
+        "Unit",
+        "Status",
+        "Entry",
+    ]
 
-    print(C.info("  Dias: seg, ter, qua, qui, sex, sab, dom (separados por vírgula)\n"))
-    descricao   = pedir("Descrição da regra")
-    tipo        = _escolher_tipo_visita() or "todos"
-    hora_inicio = pedir("Hora início (HH:MM)")
-    hora_fim    = pedir("Hora fim    (HH:MM)")
-    dias        = pedir("Dias permitidos (ex: seg,ter,qua,qui,sex)")
+    rows = []
 
-    rid = acesso.criar_regra(descricao, tipo, hora_inicio, hora_fim, dias, sessao["id"])
-    print(f"\n  {C.ok(f'Regra #{rid} cadastrada com sucesso.')}")
-    pausar()
+    for visit in visits:
+        rows.append(
+            [
+                visit["id"],
+                visit["visitor_name"][:20],
+                visit["type"],
+                visit["destination_unit"],
+                status_badge(visit["status"]),
+                (visit["checked_in_at"] or "-")[:16],
+            ]
+        )
 
-def _listar_regras():
-    limpar_tela()
-    cabecalho("Regras de Acesso Cadastradas")
-    regras = acesso.listar_regras()
-    if not regras:
-        print(C.info("  Nenhuma regra cadastrada."))
+    table(
+        columns,
+        rows,
+        [4, 22, 17, 8, 18, 16],
+    )
+
+def _create_rule():
+    clear_screen()
+    header("Create Access Rule")
+
+    print(
+        C.info(
+            "  Days: mon, tue, wed, thu, fri, sat, sun "
+            "(comma-separated)\n"
+        )
+    )
+
+    description = prompt("Rule description")
+    visitor_type = _choose_visit_type() or "all"
+    start_time = prompt("Start time (HH:MM)")
+    end_time = prompt("End time   (HH:MM)")
+    weekdays = prompt(
+        "Allowed days (e.g. mon,tue,wed,thu,fri)"
+    )
+
+    rule_id = access.create_rule(
+        description,
+        visitor_type,
+        start_time,
+        end_time,
+        weekdays,
+        session["id"],
+    )
+
+    print(
+        f"\n  {C.ok(f'Rule #{rule_id} created successfully.')}"
+    )
+
+    pause()
+
+def _list_rules():
+    clear_screen()
+    header("Registered Access Rules")
+
+    rules = access.list_rules()
+
+    if not rules:
+        print(
+            C.info("  No rules registered.")
+        )
+
     else:
-        colunas = ["ID", "Descrição", "Tipo", "Início", "Fim", "Dias", "Ativo"]
-        linhas = [[r["id"], r["descricao"][:25], r["tipo_visita"],
-                   r["hora_inicio"], r["hora_fim"], r["dias_semana"], "✓" if r["ativo"] else "✗"]
-                  for r in regras]
-        tabela(colunas, linhas, [4, 27, 10, 7, 7, 20, 6])
+        columns = [
+            "ID",
+            "Description",
+            "Type",
+            "Start",
+            "End",
+            "Days",
+            "Active",
+        ]
 
-        if sessao["perfil"] == "admin":
-            separador()
-            if confirmar("Deseja desativar alguma regra?"):
+        rows = [
+            [
+                rule["id"],
+                rule["description"][:25],
+                rule["visitor_type"],
+                rule["start_time"],
+                rule["end_time"],
+                rule["weekdays"],
+                "✓" if rule["active"] else "✗",
+            ]
+            for rule in rules
+        ]
+
+        table(
+            columns,
+            rows,
+            [4, 27, 17, 7, 7, 20, 6],
+        )
+
+        if session["role"] == "admin":
+            separator()
+
+            if confirm("Do you want to deactivate a rule?"):
                 try:
-                    rid = int(pedir("ID da regra"))
-                    acesso.desativar_regra(rid, sessao["id"])
-                    print(C.ok("Regra desativada."))
+                    rule_id = int(
+                        prompt("Rule ID")
+                    )
+
+                    access.deactivate_rule(
+                        rule_id,
+                        session["id"],
+                    )
+
+                    print(
+                        C.ok("Rule deactivated.")
+                    )
+
                 except ValueError:
-                    print(C.erro("ID inválido."))
-    pausar()
+                    print(
+                        C.error("Invalid ID.")
+                    )
+
+    pause()
 
 # ═══════════════════════════════════════════════════════════════════
-# MÓDULO DE ENCOMENDAS
+# PACKAGE MANAGEMENT MODULE
 # ═══════════════════════════════════════════════════════════════════
 
-def menu_encomendas():
+def packages_menu():
     while True:
-        limpar_tela()
-        cabecalho("Módulo de Encomendas", "Recebimento · Notificação · Retirada")
+        clear_screen()
 
-        escolha = menu("Encomendas", [
-            "Registrar recebimento",
-            "Processar retirada (com senha)",
-            "Encomendas pendentes",
-            "Histórico de encomendas",
-        ])
+        header(
+            "Package Management",
+            "Receiving · Notification · Pickup",
+        )
 
-        if escolha == -1:
+        choice = menu(
+            "Packages",
+            [
+                "Register package receipt",
+                "Process pickup (with password)",
+                "Pending packages",
+                "Package history",
+            ],
+        )
+
+        if choice == -1:
             break
-        elif escolha == 0:
-            _receber_encomenda()
-        elif escolha == 1:
-            _retirar_encomenda()
-        elif escolha == 2:
-            _encomendas_pendentes()
-        elif escolha == 3:
-            _historico_encomendas()
 
-def _receber_encomenda():
-    limpar_tela()
-    cabecalho("Registrar Recebimento de Encomenda")
+        elif choice == 0:
+            _receive_package()
 
-    unidade    = pedir("Unidade destino (ex: 101)")
-    descricao  = pedir("Descrição da encomenda")
-    rastreio   = pedir("Código de rastreio", obrigatorio=False)
-    remetente  = pedir("Remetente", obrigatorio=False)
+        elif choice == 1:
+            _pick_up_package()
 
-    resultado = encomendas.receber_encomenda(
-        descricao=descricao,
-        unidade_destino=unidade,
-        operador_id=sessao["id"],
-        codigo_rastreio=rastreio,
-        remetente=remetente,
+        elif choice == 2:
+            _pending_packages()
+
+        elif choice == 3:
+            _package_history()
+
+def _receive_package():
+    clear_screen()
+    header("Register Package Receipt")
+
+    unit = prompt(
+        "Destination unit (e.g. 101)"
     )
 
-    if resultado["ok"]:
-        print(f"  {C.ok(resultado['mensagem'])}")
-    else:
-        print(f"  {C.erro(resultado['mensagem'])}")
-    pausar()
-
-def _retirar_encomenda():
-    limpar_tela()
-    cabecalho("Processar Retirada de Encomenda")
-
-    pendentes = encomendas.listar_encomendas_pendentes()
-    if not pendentes:
-        print(C.info("  Nenhuma encomenda pendente."))
-        pausar()
-        return
-
-    _exibir_tabela_encomendas(pendentes)
-    separador()
-    print(C.aviso("  A senha de confirmação do morador é obrigatória para liberar a encomenda.\n"))
-
-    try:
-        eid = int(pedir("ID da encomenda"))
-    except ValueError:
-        print(C.erro("ID inválido."))
-        pausar()
-        return
-
-    retirada_por = pedir("Nome de quem está retirando")
-    senha = pedir("Senha de confirmação do morador", oculto=True)
-
-    resultado = encomendas.retirar_encomenda(
-        encomenda_id=eid,
-        senha_confirmacao=senha,
-        retirada_por=retirada_por,
-        operador_id=sessao["id"],
+    description = prompt(
+        "Package description"
     )
 
-    if resultado["ok"]:
-        print(f"\n  {C.ok(resultado['mensagem'])}")
+    tracking_code = prompt(
+        "Tracking code",
+        required=False,
+    )
+
+    sender = prompt(
+        "Sender",
+        required=False,
+    )
+
+    result = packages.receive_package(
+        description=description,
+        destination_unit=unit,
+        operator_id=session["id"],
+        tracking_code=tracking_code,
+        sender=sender,
+    )
+
+    if result["ok"]:
+        print(
+            f"  {C.ok(result['message'])}"
+        )
+
     else:
-        print(f"\n  {C.erro(resultado['mensagem'])}")
-    pausar()
+        print(
+            f"  {C.error(result['message'])}"
+        )
 
-def _encomendas_pendentes():
-    limpar_tela()
-    cabecalho("Encomendas Pendentes")
-    pendentes = encomendas.listar_encomendas_pendentes()
-    if not pendentes:
-        print(C.info("  Nenhuma encomenda pendente no momento."))
-    else:
-        _exibir_tabela_encomendas(pendentes)
-    pausar()
+    pause()
 
-def _historico_encomendas():
-    limpar_tela()
-    cabecalho("Histórico de Encomendas", "Últimas 20")
-    hist = encomendas.listar_encomendas_recentes(20)
-    if not hist:
-        print(C.info("  Nenhuma encomenda registrada."))
-    else:
-        _exibir_tabela_encomendas(hist)
-    pausar()
+def _pick_up_package():
+    clear_screen()
+    header("Process Package Pickup")
 
-def _exibir_tabela_encomendas(enc_list: list):
-    colunas = ["ID", "Unidade", "Descrição", "Status", "Recebida em", "Rastreio"]
-    linhas = [[
-        e["id"],
-        e["unidade_destino"],
-        e["descricao"][:25],
-        status_badge(e["status"]),
-        e["recebida_em"][:16],
-        (e["codigo_rastreio"] or "-")[:15],
-    ] for e in enc_list]
-    tabela(colunas, linhas, [4, 8, 27, 18, 16, 17])
+    pending_packages = packages.list_pending_packages()
 
-# ═══════════════════════════════════════════════════════════════════
-# TRILHA DE AUDITORIA
-# ═══════════════════════════════════════════════════════════════════
+    if not pending_packages:
+        print(
+            C.info("  No pending packages.")
+        )
 
-def menu_auditoria():
-    while True:
-        limpar_tela()
-        total = auditoria.total_eventos()
-        cabecalho("Trilha de Auditoria", f"Total de eventos registrados: {total}")
-
-        escolha = menu("Auditoria", [
-            "Ver eventos recentes (todos)",
-            "Filtrar por módulo",
-            "Inspecionar payload JSON de um evento",
-        ])
-
-        if escolha == -1:
-            break
-        elif escolha == 0:
-            _auditoria_recente()
-        elif escolha == 1:
-            _auditoria_por_modulo()
-        elif escolha == 2:
-            _inspecionar_evento()
-
-def _auditoria_recente(modulo=None, limite=30):
-    limpar_tela()
-    cabecalho("Trilha de Auditoria", f"Módulo: {modulo or 'todos'} · Últimos {limite} eventos")
-
-    eventos = auditoria.buscar_trilha(modulo=modulo, limite=limite)
-    if not eventos:
-        print(C.info("  Nenhum evento encontrado."))
-        pausar()
+        pause()
         return
 
-    colunas = ["ID", "Ação", "Módulo", "Operador", "Data/Hora"]
-    linhas = [[
-        e["id"],
-        e["acao"][:25],
-        e["modulo"],
-        (e["operador_login"] or "sistema")[:15],
-        e["registrado_em"][:16],
-    ] for e in eventos]
-    tabela(colunas, linhas, [5, 27, 10, 17, 16])
-    pausar()
+    _display_package_table(pending_packages)
+    separator()
 
-def _auditoria_por_modulo():
-    modulos = ["acesso", "encomenda", "sistema", "operador", "morador"]
-    escolha = menu("Filtrar por módulo", [m.capitalize() for m in modulos])
-    if escolha == -1:
-        return
-    _auditoria_recente(modulo=modulos[escolha])
-
-def _inspecionar_evento():
-    limpar_tela()
-    cabecalho("Inspecionar Evento de Auditoria")
+    print(
+        C.warning(
+            "  The resident's confirmation password is required "
+            "to release the package.\n"
+        )
+    )
 
     try:
-        eid = int(pedir("ID do evento"))
+        package_id = int(
+            prompt("Package ID")
+        )
+
     except ValueError:
-        print(C.erro("ID inválido."))
-        pausar()
+        print(
+            C.error("Invalid ID.")
+        )
+
+        pause()
+        return
+
+    picked_up_by = prompt(
+        "Name of person picking up"
+    )
+
+    confirmation_password = prompt(
+        "Resident confirmation password",
+        hidden=True,
+    )
+
+    result = packages.pick_up_package(
+        package_id=package_id,
+        confirmation_password=confirmation_password,
+        picked_up_by=picked_up_by,
+        operator_id=session["id"],
+    )
+
+    if result["ok"]:
+        print(
+            f"\n  {C.ok(result['message'])}"
+        )
+
+    else:
+        print(
+            f"\n  {C.error(result['message'])}"
+        )
+
+    pause()
+
+
+def _pending_packages():
+    clear_screen()
+    header("Pending Packages")
+
+    pending_packages = packages.list_pending_packages()
+
+    if not pending_packages:
+        print(
+            C.info(
+                "  No pending packages at the moment."
+            )
+        )
+
+    else:
+        _display_package_table(
+            pending_packages
+        )
+
+    pause()
+
+def _package_history():
+    clear_screen()
+
+    header(
+        "Package History",
+        "Last 20",
+    )
+
+    history = packages.list_recent_packages(20)
+
+    if not history:
+        print(
+            C.info("  No packages registered.")
+        )
+
+    else:
+        _display_package_table(history)
+
+    pause()
+
+def _display_package_table(
+    package_list: list,
+):
+    columns = [
+        "ID",
+        "Unit",
+        "Description",
+        "Status",
+        "Received",
+        "Tracking",
+    ]
+
+    rows = [
+        [
+            package["id"],
+            package["destination_unit"],
+            package["description"][:25],
+            status_badge(package["status"]),
+            package["received_at"][:16],
+            (package["tracking_code"] or "-")[:15],
+        ]
+        for package in package_list
+    ]
+
+    table(
+        columns,
+        rows,
+        [4, 8, 27, 18, 16, 17],
+    )
+
+# ═══════════════════════════════════════════════════════════════════
+# AUDIT TRAIL
+# ═══════════════════════════════════════════════════════════════════
+
+def audit_menu():
+    while True:
+        clear_screen()
+
+        total = audit_log.get_total_events()
+
+        header(
+            "Audit Trail",
+            f"Total registered events: {total}",
+        )
+
+        choice = menu(
+            "Audit",
+            [
+                "View recent events (all)",
+                "Filter by module",
+                "Inspect event JSON payload",
+            ],
+        )
+
+        if choice == -1:
+            break
+
+        elif choice == 0:
+            _recent_audit_events()
+
+        elif choice == 1:
+            _audit_by_module()
+
+        elif choice == 2:
+            _inspect_event()
+
+def _recent_audit_events(
+    module=None,
+    limit=30,
+):
+    clear_screen()
+
+    header(
+        "Audit Trail",
+        f"Module: {module or 'all'} · "
+        f"Last {limit} events",
+    )
+
+    events = audit_log.search_audit_trail(
+        module=module,
+        limit=limit,
+    )
+
+    if not events:
+        print(
+            C.info("  No events found.")
+        )
+
+        pause()
+        return
+
+    columns = [
+        "ID",
+        "Action",
+        "Module",
+        "Operator",
+        "Date/Time",
+    ]
+
+    rows = [
+        [
+            event["id"],
+            event["action"][:25],
+            event["module"],
+            (event["operator_username"] or "system")[:15],
+            event["recorded_at"][:16],
+        ]
+        for event in events
+    ]
+
+    table(
+        columns,
+        rows,
+        [5, 27, 10, 17, 16],
+    )
+
+    pause()
+
+def _audit_by_module():
+    modules = [
+        "access",
+        "package",
+        "system",
+        "operator",
+        "resident",
+    ]
+
+    choice = menu(
+        "Filter by module",
+        [
+            module.capitalize()
+            for module in modules
+        ],
+    )
+
+    if choice == -1:
+        return
+
+    _recent_audit_events(
+        module=modules[choice]
+    )
+
+def _inspect_event():
+    clear_screen()
+    header("Inspect Audit Event")
+
+    try:
+        event_id = int(
+            prompt("Event ID")
+        )
+
+    except ValueError:
+        print(
+            C.error("Invalid ID.")
+        )
+
+        pause()
         return
 
     from db.database import get_connection
+
     conn = get_connection()
-    ev = conn.execute(
+
+    event = conn.execute(
         """
-        SELECT a.*, o.nome AS op_nome, o.login AS op_login
-        FROM auditoria a
-        LEFT JOIN operadores o ON o.id = a.operador_id
+        SELECT a.*,
+               o.name AS operator_name,
+               o.username AS operator_username
+        FROM audit_log a
+        LEFT JOIN operators o
+            ON o.id = a.operator_id
         WHERE a.id = ?
         """,
-        (eid,),
+        (event_id,),
     ).fetchone()
+
     conn.close()
 
-    if not ev:
-        print(C.erro("Evento não encontrado."))
-        pausar()
+    if not event:
+        print(
+            C.error("Event not found.")
+        )
+
+        pause()
         return
 
-    separador("Metadados")
-    print(f"  ID:          {ev['id']}")
-    print(f"  Ação:        {C.BOLD}{ev['acao']}{C.RESET}")
-    print(f"  Módulo:      {ev['modulo']}")
-    print(f"  Operador:    {ev['op_nome'] or 'Sistema'} ({ev['op_login'] or '-'})")
-    print(f"  Registrado:  {ev['registrado_em']}")
-    print(f"  IP:          {ev['ip_origem'] or '-'}")
-    exibir_json_formatado(ev["payload_json"], titulo="Payload JSON:")
-    pausar()
+    separator("Metadata")
+
+    print(
+        f"  ID:          {event['id']}"
+    )
+
+    print(
+        f"  Action:      "
+        f"{C.BOLD}{event['action']}{C.RESET}"
+    )
+
+    print(
+        f"  Module:      {event['module']}"
+    )
+
+    print(
+        f"  Operator:    "
+        f"{event['operator_name'] or 'System'} "
+        f"({event['operator_username'] or '-'})"
+    )
+
+    print(
+        f"  Recorded:    {event['recorded_at']}"
+    )
+
+    print(
+        f"  IP:          {event['source_ip'] or '-'}"
+    )
+
+    display_formatted_json(
+        event["payload_json"],
+        title="JSON Payload:",
+    )
+
+    pause()
 
 # ═══════════════════════════════════════════════════════════════════
-# GESTÃO DE OPERADORES (apenas admin)
+# OPERATOR MANAGEMENT (ADMIN ONLY)
 # ═══════════════════════════════════════════════════════════════════
 
-def menu_operadores():
+def operators_menu():
     while True:
-        limpar_tela()
-        cabecalho("Gerenciar Operadores", "Apenas administradores")
+        clear_screen()
 
-        escolha = menu("Operadores", [
-            "Listar operadores",
-            "Cadastrar novo operador",
-            "Desativar operador",
-        ])
+        header(
+            "Manage Operators",
+            "Administrators only",
+        )
 
-        if escolha == -1:
+        choice = menu(
+            "Operators",
+            [
+                "List operators",
+                "Create new operator",
+                "Deactivate operator",
+            ],
+        )
+
+        if choice == -1:
             break
-        elif escolha == 0:
-            _listar_operadores()
-        elif escolha == 1:
-            _cadastrar_operador()
-        elif escolha == 2:
-            _desativar_operador()
 
-def _listar_operadores():
-    limpar_tela()
-    cabecalho("Operadores Cadastrados")
-    ops = auth.listar_operadores()
-    colunas = ["ID", "Nome", "Login", "Perfil", "Ativo"]
-    linhas = [[o["id"], o["nome"][:25], o["login"], o["perfil"], "✓" if o["ativo"] else "✗"]
-              for o in ops]
-    tabela(colunas, linhas, [4, 27, 15, 10, 6])
-    pausar()
+        elif choice == 0:
+            _list_operators()
 
-def _cadastrar_operador():
-    limpar_tela()
-    cabecalho("Cadastrar Novo Operador")
+        elif choice == 1:
+            _create_operator()
 
-    nome   = pedir("Nome completo")
-    login  = pedir("Login (único)")
-    senha  = pedir("Senha", oculto=True)
-    perfis = ["porteiro", "admin"]
-    idx    = menu("Perfil", ["Porteiro", "Admin"])
-    if idx == -1:
+        elif choice == 2:
+            _deactivate_operator()
+
+def _list_operators():
+    clear_screen()
+    header("Registered Operators")
+
+    operators = auth.list_operators()
+
+    columns = [
+        "ID",
+        "Name",
+        "Username",
+        "Role",
+        "Active",
+    ]
+
+    rows = [
+        [
+            operator["id"],
+            operator["name"][:25],
+            operator["username"],
+            operator["role"],
+            "✓" if operator["active"] else "✗",
+        ]
+        for operator in operators
+    ]
+
+    table(
+        columns,
+        rows,
+        [4, 27, 15, 10, 6],
+    )
+
+    pause()
+
+def _create_operator():
+    clear_screen()
+    header("Create New Operator")
+
+    name = prompt("Full name")
+    username = prompt("Username (unique)")
+    password = prompt(
+        "Password",
+        hidden=True,
+    )
+
+    roles = [
+        "doorman",
+        "admin",
+    ]
+
+    index = menu(
+        "Role",
+        [
+            "Doorman",
+            "Admin",
+        ],
+    )
+
+    if index == -1:
         return
-    perfil = perfis[idx]
 
-    resultado = auth.criar_operador(nome, login, senha, perfil, sessao["id"])
-    if resultado["ok"]:
-        print(f"\n  {C.ok(resultado['mensagem'])}")
+    role = roles[index]
+
+    result = auth.create_operator(
+        name,
+        username,
+        password,
+        role,
+        session["id"],
+    )
+
+    if result["ok"]:
+        print(
+            f"\n  {C.ok(result['message'])}"
+        )
+
     else:
-        print(f"\n  {C.erro(resultado['mensagem'])}")
-    pausar()
+        print(
+            f"\n  {C.error(result['message'])}"
+        )
 
-def _desativar_operador():
-    _listar_operadores()
+    pause()
+
+def _deactivate_operator():
+    _list_operators()
+
     try:
-        oid = int(pedir("ID do operador para desativar"))
+        operator_id = int(
+            prompt(
+                "Operator ID to deactivate"
+            )
+        )
+
     except ValueError:
-        print(C.erro("ID inválido."))
-        pausar()
+        print(
+            C.error("Invalid ID.")
+        )
+
+        pause()
         return
 
-    if confirmar(f"Confirma desativação do operador #{oid}?"):
-        resultado = auth.desativar_operador(oid, sessao["id"])
-        if resultado["ok"]:
-            print(C.ok(resultado["mensagem"]))
+    if confirm(
+        f"Confirm deactivation of operator #{operator_id}?"
+    ):
+        result = auth.deactivate_operator(
+            operator_id,
+            session["id"],
+        )
+
+        if result["ok"]:
+            print(
+                C.ok(result["message"])
+            )
+
         else:
-            print(C.erro(resultado["mensagem"]))
-    pausar()
+            print(
+                C.error(result["message"])
+            )
+
+    pause()
 
 # ═══════════════════════════════════════════════════════════════════
-# GESTÃO DE MORADORES (apenas admin)
+# RESIDENT MANAGEMENT (ADMIN ONLY)
 # ═══════════════════════════════════════════════════════════════════
 
-def menu_moradores():
+def residents_menu():
     while True:
-        limpar_tela()
-        cabecalho("Gerenciar Moradores")
+        clear_screen()
+        header("Manage Residents")
 
-        escolha = menu("Moradores", [
-            "Listar moradores",
-            "Cadastrar morador",
-            "Desativar morador",
-        ])
+        choice = menu(
+            "Residents",
+            [
+                "List residents",
+                "Create resident",
+                "Deactivate resident",
+            ],
+        )
 
-        if escolha == -1:
+        if choice == -1:
             break
-        elif escolha == 0:
-            _listar_moradores()
-        elif escolha == 1:
-            _cadastrar_morador()
-        elif escolha == 2:
-            _desativar_morador()
 
-def _listar_moradores():
-    limpar_tela()
-    cabecalho("Moradores Cadastrados")
-    mors = auth.listar_moradores()
-    colunas = ["ID", "Nome", "Unidade", "Telefone", "Ativo"]
-    linhas = [[m["id"], m["nome"][:25], m["unidade"], m["telefone"] or "-", "✓" if m["ativo"] else "✗"]
-              for m in mors]
-    tabela(colunas, linhas, [4, 27, 8, 15, 6])
-    pausar()
+        elif choice == 0:
+            _list_residents()
 
-def _cadastrar_morador():
-    limpar_tela()
-    cabecalho("Cadastrar Morador")
+        elif choice == 1:
+            _create_resident()
 
-    nome    = pedir("Nome do morador")
-    unidade = pedir("Unidade (ex: 101, B204)")
-    tel     = pedir("Telefone", obrigatorio=False)
+        elif choice == 2:
+            _deactivate_resident()
 
-    print(C.info("\n  A senha de encomenda será exigida na retirada de pacotes."))
-    senha = pedir("Senha de confirmação de encomenda", oculto=True)
+def _list_residents():
+    clear_screen()
+    header("Registered Residents")
 
-    resultado = auth.criar_morador(nome, unidade, senha, sessao["id"], tel)
-    if resultado["ok"]:
-        print(f"\n  {C.ok(resultado['mensagem'])}")
+    residents = auth.list_residents()
+
+    columns = [
+        "ID",
+        "Name",
+        "Unit",
+        "Phone",
+        "Active",
+    ]
+
+    rows = [
+        [
+            resident["id"],
+            resident["name"][:25],
+            resident["unit"],
+            resident["phone"] or "-",
+            "✓" if resident["active"] else "✗",
+        ]
+        for resident in residents
+    ]
+
+    table(
+        columns,
+        rows,
+        [4, 27, 8, 15, 6],
+    )
+
+    pause()
+
+def _create_resident():
+    clear_screen()
+    header("Create Resident")
+
+    name = prompt("Resident name")
+    unit = prompt(
+        "Unit (e.g. 101, B204)"
+    )
+
+    phone = prompt(
+        "Phone",
+        required=False,
+    )
+
+    print(
+        C.info(
+            "\n  The package password will be required "
+            "when picking up packages."
+        )
+    )
+
+    password = prompt(
+        "Package confirmation password",
+        hidden=True,
+    )
+
+    result = auth.create_resident(
+        name,
+        unit,
+        password,
+        session["id"],
+        phone,
+    )
+
+    if result["ok"]:
+        print(
+            f"\n  {C.ok(result['message'])}"
+        )
+
     else:
-        print(f"\n  {C.erro(resultado['mensagem'])}")
-    pausar()
+        print(
+            f"\n  {C.error(result['message'])}"
+        )
 
+    pause()
 
-def _desativar_morador():
-    _listar_moradores()
+def _deactivate_resident():
+    _list_residents()
+
     try:
-        mid = int(pedir("ID do morador para desativar"))
+        resident_id = int(
+            prompt(
+                "Resident ID to deactivate"
+            )
+        )
+
     except ValueError:
-        print(C.erro("ID inválido."))
-        pausar()
+        print(
+            C.error("Invalid ID.")
+        )
+
+        pause()
         return
-    if confirmar(f"Confirma desativação do morador #{mid}?"):
-        resultado = auth.desativar_morador(mid, sessao["id"])
-        print(C.ok(resultado["mensagem"]) if resultado["ok"] else C.erro(resultado["mensagem"]))
-    pausar()
 
+    if confirm(
+        f"Confirm deactivation of resident #{resident_id}?"
+    ):
+        result = auth.deactivate_resident(
+            resident_id,
+            session["id"],
+        )
+
+        if result["ok"]:
+            print(
+                C.ok(result["message"])
+            )
+
+        else:
+            print(
+                C.error(result["message"])
+            )
+
+    pause()
 
 # ═══════════════════════════════════════════════════════════════════
-# SEED — dados iniciais para demonstração
+# SEED — INITIAL DEMONSTRATION DATA
 # ═══════════════════════════════════════════════════════════════════
 
-def _seed_dados_iniciais():
-    """Popula o banco com dados de exemplo se ainda não existirem."""
+def _seed_initial_data():
+    """Populates the database with sample data if it does not exist yet."""
+
     from db.database import get_connection
+
     conn = get_connection()
-    existe = conn.execute("SELECT id FROM operadores WHERE login = 'admin'").fetchone()
+
+    existing = conn.execute(
+        "SELECT id FROM operators WHERE username = 'admin'"
+    ).fetchone()
+
     conn.close()
 
-    if existe:
+    if existing:
         return
 
     import hashlib
-    def h(s): return hashlib.sha256(s.encode()).hexdigest()
+
+    def hash_password(value):
+        return hashlib.sha256(
+            value.encode()
+        ).hexdigest()
 
     conn = get_connection()
 
-    conn.execute("INSERT INTO operadores (nome, login, senha_hash, perfil) VALUES (?,?,?,?)",
-                 ("Administrador", "admin", h("admin123"), "admin"))
-    conn.execute("INSERT INTO operadores (nome, login, senha_hash, perfil) VALUES (?,?,?,?)",
-                 ("João Porteiro", "joao", h("porteiro123"), "porteiro"))
+    conn.execute(
+        """
+        INSERT INTO operators
+            (name, username, password_hash, role)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            "Administrator",
+            "admin",
+            hash_password("admin123"),
+            "admin",
+        ),
+    )
 
-    conn.execute("INSERT INTO moradores (nome, unidade, telefone, senha_encomenda) VALUES (?,?,?,?)",
-                 ("Maria Silva", "101", "11999990001", "1234"))
-    conn.execute("INSERT INTO moradores (nome, unidade, telefone, senha_encomenda) VALUES (?,?,?,?)",
-                 ("Carlos Souza", "202", "11999990002", "5678"))
-    conn.execute("INSERT INTO moradores (nome, unidade, telefone, senha_encomenda) VALUES (?,?,?,?)",
-                 ("Ana Lima", "303", "11999990003", "9999"))
+    conn.execute(
+        """
+        INSERT INTO operators
+            (name, username, password_hash, role)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            "John Doorman",
+            "john",
+            hash_password("doorman123"),
+            "doorman",
+        ),
+    )
 
-    conn.execute("""
-        INSERT INTO regras_acesso (descricao, tipo_visita, hora_inicio, hora_fim, dias_semana)
-        VALUES (?,?,?,?,?)
-    """, ("Visitantes horário comercial", "visitante", "08:00", "22:00", "seg,ter,qua,qui,sex,sab,dom"))
-    conn.execute("""
-        INSERT INTO regras_acesso (descricao, tipo_visita, hora_inicio, hora_fim, dias_semana)
-        VALUES (?,?,?,?,?)
-    """, ("Prestadores dias úteis", "prestador", "08:00", "18:00", "seg,ter,qua,qui,sex"))
-    conn.execute("""
-        INSERT INTO regras_acesso (descricao, tipo_visita, hora_inicio, hora_fim, dias_semana)
-        VALUES (?,?,?,?,?)
-    """, ("Entregadores horário amplo", "entregador", "07:00", "21:00", "seg,ter,qua,qui,sex,sab"))
+    conn.execute(
+        """
+        INSERT INTO residents
+            (name, unit, phone, package_password)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            "Maria Silva",
+            "101",
+            "11999990001",
+            "1234",
+        ),
+    )
+
+    conn.execute(
+        """
+        INSERT INTO residents
+            (name, unit, phone, package_password)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            "Carlos Souza",
+            "202",
+            "11999990002",
+            "5678",
+        ),
+    )
+
+    conn.execute(
+        """
+        INSERT INTO residents
+            (name, unit, phone, package_password)
+        VALUES (?, ?, ?, ?)
+        """,
+        (
+            "Ana Lima",
+            "303",
+            "11999990003",
+            "9999",
+        ),
+    )
+
+    conn.execute(
+        """
+        INSERT INTO access_rules
+            (
+                description,
+                visitor_type,
+                start_time,
+                end_time,
+                weekdays
+            )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            "Business hours visitors",
+            "visitor",
+            "08:00",
+            "22:00",
+            "mon,tue,wed,thu,fri,sat,sun",
+        ),
+    )
+
+    conn.execute(
+        """
+        INSERT INTO access_rules
+            (
+                description,
+                visitor_type,
+                start_time,
+                end_time,
+                weekdays
+            )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            "Weekday service providers",
+            "service_provider",
+            "08:00",
+            "18:00",
+            "mon,tue,wed,thu,fri",
+        ),
+    )
+
+    conn.execute(
+        """
+        INSERT INTO access_rules
+            (
+                description,
+                visitor_type,
+                start_time,
+                end_time,
+                weekdays
+            )
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (
+            "Extended delivery hours",
+            "delivery",
+            "07:00",
+            "21:00",
+            "mon,tue,wed,thu,fri,sat",
+        ),
+    )
 
     conn.commit()
     conn.close()
 
-
 # ═══════════════════════════════════════════════════════════════════
-# PONTO DE ENTRADA
+# ENTRY POINT
 # ═══════════════════════════════════════════════════════════════════
 
 def main():
     init_db()
-    _seed_dados_iniciais()
+    _seed_initial_data()
 
-    limpar_tela()
-    cabecalho("Sistema de Portaria", "v1.0  ·  Controle · Logística · Auditoria")
-    print(f"""
-  {C.BOLD}Credenciais de demonstração:{C.RESET}
+    clear_screen()
 
-  {C.CYAN}Admin{C.RESET}    →  login: {C.BOLD}admin{C.RESET}     senha: {C.BOLD}admin123{C.RESET}
-  {C.CYAN}Porteiro{C.RESET} →  login: {C.BOLD}joao{C.RESET}      senha: {C.BOLD}porteiro123{C.RESET}
+    header(
+        "Gatehouse System",
+        "v1.0  ·  Control · Logistics · Audit",
+    )
 
-  {C.GRAY}Moradores de exemplo: unidades 101, 202, 303{C.RESET}
-  {C.GRAY}Senhas de encomenda:  1234  /  5678  /  9999{C.RESET}
-    """)
-    pausar()
+    print(
+        f"""
+  {C.BOLD}Demo Credentials:{C.RESET}
+
+  {C.CYAN}Admin{C.RESET}     →  username: {C.BOLD}admin{C.RESET}   password: {C.BOLD}admin123{C.RESET}
+  {C.CYAN}Doorman{C.RESET}   →  username: {C.BOLD}john{C.RESET}    password: {C.BOLD}doorman123{C.RESET}
+
+  {C.GRAY}Sample residents: units 101, 202, 303{C.RESET}
+  {C.GRAY}Package passwords: 1234 / 5678 / 9999{C.RESET}
+    """
+    )
+
+    pause()
 
     while True:
-        if not sessao:
-            tela_login()
-        else:
-            menu_principal()
+        if not session:
+            login_screen()
 
+        else:
+            main_menu()
 
 if __name__ == "__main__":
     main()
