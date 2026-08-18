@@ -6,7 +6,8 @@ All tables are created here, including the immutable audit table.
 import sqlite3
 import os
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "portaria.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "gatehouse.db")
+
 
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH)
@@ -14,120 +15,121 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
+
 def init_db():
     conn = get_connection()
     cursor = conn.cursor()
 
     # ── OPERATORS ────────────────────────────────────────────────
-    
-    cursor.execute("""
-        CREATE TABLE IF NOT EXISTS operadores (
-            id          INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome        TEXT    NOT NULL,
-            login       TEXT    NOT NULL UNIQUE,
-            senha_hash  TEXT    NOT NULL,
-            perfil      TEXT    NOT NULL CHECK(perfil IN ('admin', 'porteiro')),
-            ativo       INTEGER NOT NULL DEFAULT 1,
-            criado_em   TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
-        )
-    """)
-
-    # ── RESIDENTS ─────────────────────────────────────────────────
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS moradores (
+        CREATE TABLE IF NOT EXISTS operators (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome            TEXT    NOT NULL,
-            unidade         TEXT    NOT NULL UNIQUE,
-            telefone        TEXT,
-            senha_encomenda TEXT    NOT NULL,
-            ativo           INTEGER NOT NULL DEFAULT 1,
-            criado_em       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+            name            TEXT    NOT NULL,
+            username        TEXT    NOT NULL UNIQUE,
+            password_hash   TEXT    NOT NULL,
+            role            TEXT    NOT NULL CHECK(role IN ('admin', 'doorman')),
+            active          INTEGER NOT NULL DEFAULT 1,
+            created_at      TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
         )
     """)
 
-    # ── ACESS RULE  ──────────────────────────────────────────
+    # ── RESIDENTS ────────────────────────────────────────────────
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS regras_acesso (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            descricao    TEXT    NOT NULL,
-            tipo_visita  TEXT    NOT NULL CHECK(tipo_visita IN ('visitante','prestador','entregador','todos')),
-            hora_inicio  TEXT    NOT NULL,
-            hora_fim     TEXT    NOT NULL,
-            dias_semana  TEXT    NOT NULL,
-            ativo        INTEGER NOT NULL DEFAULT 1
+        CREATE TABLE IF NOT EXISTS residents (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            name                TEXT    NOT NULL,
+            unit                TEXT    NOT NULL UNIQUE,
+            phone               TEXT,
+            package_password    TEXT    NOT NULL,
+            active              INTEGER NOT NULL DEFAULT 1,
+            created_at          TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
         )
     """)
 
-    # ── VISITORS / SERVICE PROVIDERS ──────────────────────────────────
+    # ── ACCESS RULES ─────────────────────────────────────────────
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS visitas (
+        CREATE TABLE IF NOT EXISTS access_rules (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            nome_visitante  TEXT    NOT NULL,
-            tipo            TEXT    NOT NULL CHECK(tipo IN ('visitante','prestador','entregador')),
-            documento       TEXT,
-            unidade_destino TEXT    NOT NULL,
-            operador_id     INTEGER NOT NULL REFERENCES operadores(id),
-            status          TEXT    NOT NULL DEFAULT 'aguardando'
-                                    CHECK(status IN ('aguardando','autorizado','negado','saida')),
-            motivo_negacao  TEXT,
-            entrada_em      TEXT,
-            saida_em        TEXT,
-            criado_em       TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+            description     TEXT    NOT NULL,
+            visitor_type    TEXT    NOT NULL CHECK(visitor_type IN ('visitor','service_provider','delivery','all')),
+            start_time      TEXT    NOT NULL,
+            end_time        TEXT    NOT NULL,
+            weekdays        TEXT    NOT NULL,
+            active          INTEGER NOT NULL DEFAULT 1
         )
     """)
 
-    # ── ENCOMENDS ────────────────────────────────────────────────
+    # ── VISITS ──────────────────────────────────────────────────
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS encomendas (
+        CREATE TABLE IF NOT EXISTS visits (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            visitor_name        TEXT    NOT NULL,
+            type                TEXT    NOT NULL CHECK(type IN ('visitor','service_provider','delivery')),
+            document            TEXT,
+            destination_unit    TEXT    NOT NULL,
+            operator_id         INTEGER NOT NULL REFERENCES operators(id),
+            status              TEXT    NOT NULL DEFAULT 'pending'
+                                        CHECK(status IN ('pending','authorized','denied','checked_out')),
+            denial_reason       TEXT,
+            checked_in_at       TEXT,
+            checked_out_at      TEXT,
+            created_at          TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
+        )
+    """)
+
+    # ── PACKAGES ────────────────────────────────────────────────
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS packages (
+            id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+            tracking_code       TEXT,
+            description         TEXT    NOT NULL,
+            sender              TEXT,
+            destination_unit    TEXT    NOT NULL REFERENCES residents(unit),
+            operator_id         INTEGER NOT NULL REFERENCES operators(id),
+            status              TEXT    NOT NULL DEFAULT 'received'
+                                        CHECK(status IN ('received','notified','picked_up')),
+            received_at         TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
+            picked_up_at        TEXT,
+            picked_up_by        TEXT
+        )
+    """)
+
+    # ── AUDIT LOG (IMMUTABLE) ───────────────────────────────────
+
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
-            codigo_rastreio TEXT,
-            descricao       TEXT    NOT NULL,
-            remetente       TEXT,
-            unidade_destino TEXT    NOT NULL REFERENCES moradores(unidade),
-            operador_id     INTEGER NOT NULL REFERENCES operadores(id),
-            status          TEXT    NOT NULL DEFAULT 'recebida'
-                                    CHECK(status IN ('recebida','notificado','retirada')),
-            recebida_em     TEXT    NOT NULL DEFAULT (datetime('now','localtime')),
-            retirada_em     TEXT,
-            retirada_por    TEXT
+            operator_id     INTEGER REFERENCES operators(id),
+            action          TEXT    NOT NULL,
+            module          TEXT    NOT NULL CHECK(module IN ('access','package','system','operator','resident')),
+            payload_json    TEXT    NOT NULL,
+            source_ip       TEXT,
+            recorded_at     TEXT    NOT NULL DEFAULT (datetime('now','localtime'))
         )
     """)
 
-    # ── ORDINANCE TRAIL (IMUTABLE) ────────────────────────────
+    # Trigger: Prevent UPDATE on audit_log
 
     cursor.execute("""
-        CREATE TABLE IF NOT EXISTS auditoria (
-            id           INTEGER PRIMARY KEY AUTOINCREMENT,
-            operador_id  INTEGER REFERENCES operadores(id),
-            acao         TEXT    NOT NULL,
-            modulo       TEXT    NOT NULL CHECK(modulo IN ('acesso','encomenda','sistema','operador','morador')),
-            payload_json TEXT    NOT NULL,
-            ip_origem    TEXT,
-            registrado_em TEXT   NOT NULL DEFAULT (datetime('now','localtime'))
-        )
-    """)
-
-    # Trigger: Dont allow UPDATE in auditoria
-
-    cursor.execute("""
-        CREATE TRIGGER IF NOT EXISTS bloqueia_update_auditoria
-        BEFORE UPDATE ON auditoria
+        CREATE TRIGGER IF NOT EXISTS block_audit_update
+        BEFORE UPDATE ON audit_log
         BEGIN
-            SELECT RAISE(ABORT, 'VIOLAÇÃO: registros de auditoria são imutáveis.');
+            SELECT RAISE(ABORT, 'VIOLATION: audit records are immutable.');
         END
     """)
 
-    # Trigger: Dont allow DELETE in auditoria
+    # Trigger: Prevent DELETE on audit_log
 
     cursor.execute("""
-        CREATE TRIGGER IF NOT EXISTS bloqueia_delete_auditoria
-        BEFORE DELETE ON auditoria
+        CREATE TRIGGER IF NOT EXISTS block_audit_delete
+        BEFORE DELETE ON audit_log
         BEGIN
-            SELECT RAISE(ABORT, 'VIOLAÇÃO: registros de auditoria não podem ser excluídos.');
+            SELECT RAISE(ABORT, 'VIOLATION: audit records cannot be deleted.');
         END
     """)
 
