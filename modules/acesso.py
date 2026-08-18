@@ -1,251 +1,368 @@
 """
-Módulo de Controle de Acesso Inteligente.
-Valida horário, tipo de visitante e regras cadastradas ANTES de permitir entrada.
-O operador NÃO pode sobrescrever uma negação — a regra é soberana.
+Smart Access Control Module.
+Validates time, visitor type, and registered rules BEFORE allowing entry.
+The operator CANNOT override a denial — the rule is sovereign.
 """
 
 from datetime import datetime
 from db.database import get_connection
-from modules.auditoria import registrar
+from modules.audit_log import record
 
-# Mapeamento de dia da semana para abreviação usada nas regras
-_DIAS = {0: "seg", 1: "ter", 2: "qua", 3: "qui", 4: "sex", 5: "sab", 6: "dom"}
+# Mapping of weekdays to abbreviations used in the rules
+_WEEKDAYS = {
+    0: "mon",
+    1: "tue",
+    2: "wed",
+    3: "thu",
+    4: "fri",
+    5: "sat",
+    6: "sun",
+}
 
-def _hora_atual() -> str:
+
+def _current_time() -> str:
     return datetime.now().strftime("%H:%M")
 
-def _dia_atual() -> str:
-    return _DIAS[datetime.now().weekday()]
 
-def verificar_regras(tipo_visita: str) -> tuple[bool, str]:
+def _current_weekday() -> str:
+    return _WEEKDAYS[datetime.now().weekday()]
+
+
+def check_rules(visitor_type: str) -> tuple[bool, str]:
     conn = get_connection()
+
     try:
-        regras = conn.execute(
+        rules = conn.execute(
             """
-            SELECT * FROM regras_acesso
-            WHERE ativo = 1
-              AND (tipo_visita = ? OR tipo_visita = 'todos')
+            SELECT * FROM access_rules
+            WHERE active = 1
+              AND (visitor_type = ? OR visitor_type = 'all')
             """,
-            (tipo_visita,),
+            (visitor_type,),
         ).fetchall()
 
-        if not regras:
-            return False, f"Nenhuma regra de acesso cadastrada para '{tipo_visita}'."
+        if not rules:
+            return False, f"No access rule registered for '{visitor_type}'."
 
-        hora_agora = _hora_atual()
-        dia_agora = _dia_atual()
+        current_time = _current_time()
+        current_weekday = _current_weekday()
 
-        for regra in regras:
-            dias_permitidos = [d.strip() for d in regra["dias_semana"].split(",")]
-            if dia_agora not in dias_permitidos:
+        for rule in rules:
+            allowed_days = [
+                day.strip()
+                for day in rule["weekdays"].split(",")
+            ]
+
+            if current_weekday not in allowed_days:
                 continue
-            if regra["hora_inicio"] <= hora_agora <= regra["hora_fim"]:
-                return True, f"Acesso permitido pela regra: '{regra['descricao']}'."
+
+            if rule["start_time"] <= current_time <= rule["end_time"]:
+                return (
+                    True,
+                    f"Access granted by rule: '{rule['description']}'.",
+                )
 
         return (
             False,
-            f"Acesso BLOQUEADO. Tipo '{tipo_visita}' não permitido em {dia_agora} às {hora_agora}.",
+            f"Access BLOCKED. Type '{visitor_type}' is not allowed "
+            f"on {current_weekday} at {current_time}.",
         )
+
     finally:
         conn.close()
 
-def registrar_visita(
-    nome_visitante: str,
-    tipo: str,
-    unidade_destino: str,
-    operador_id: int,
-    documento: str = "",
+
+def register_visit(
+    visitor_name: str,
+    type: str,
+    destination_unit: str,
+    operator_id: int,
+    document: str = "",
 ) -> dict:
-    permitido, motivo = verificar_regras(tipo)
+    allowed, reason = check_rules(type)
 
     conn = get_connection()
+
     try:
-        if permitido:
-            status = "autorizado"
-            entrada_em = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if allowed:
+            status = "authorized"
+            checked_in_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
             cursor = conn.execute(
                 """
-                INSERT INTO visitas
-                    (nome_visitante, tipo, documento, unidade_destino,
-                     operador_id, status, entrada_em)
-                VALUES (?, ?, ?, ?, ?, 'autorizado', ?)
+                INSERT INTO visits
+                    (visitor_name, type, document, destination_unit,
+                     operator_id, status, checked_in_at)
+                VALUES (?, ?, ?, ?, ?, 'authorized', ?)
                 """,
-                (nome_visitante, tipo, documento, unidade_destino, operador_id, entrada_em),
+                (
+                    visitor_name,
+                    type,
+                    document,
+                    destination_unit,
+                    operator_id,
+                    checked_in_at,
+                ),
             )
-            visita_id = cursor.lastrowid
+
+            visit_id = cursor.lastrowid
             conn.commit()
 
-            registrar(
-                acao="ACESSO_AUTORIZADO",
-                modulo="acesso",
+            record(
+                action="ACCESS_GRANTED",
+                module="access",
                 payload={
-                    "visita_id": visita_id,
-                    "visitante": nome_visitante,
-                    "tipo": tipo,
-                    "unidade": unidade_destino,
-                    "documento": documento,
-                    "motivo": motivo,
+                    "visit_id": visit_id,
+                    "visitor": visitor_name,
+                    "type": type,
+                    "unit": destination_unit,
+                    "document": document,
+                    "reason": reason,
                 },
-                operador_id=operador_id,
+                operator_id=operator_id,
             )
-            return {"ok": True, "visita_id": visita_id, "mensagem": motivo}
+
+            return {
+                "ok": True,
+                "visit_id": visit_id,
+                "message": reason,
+            }
 
         else:
             cursor = conn.execute(
                 """
-                INSERT INTO visitas
-                    (nome_visitante, tipo, documento, unidade_destino,
-                     operador_id, status, motivo_negacao)
-                VALUES (?, ?, ?, ?, ?, 'negado', ?)
+                INSERT INTO visits
+                    (visitor_name, type, document, destination_unit,
+                     operator_id, status, denial_reason)
+                VALUES (?, ?, ?, ?, ?, 'denied', ?)
                 """,
-                (nome_visitante, tipo, documento, unidade_destino, operador_id, motivo),
+                (
+                    visitor_name,
+                    type,
+                    document,
+                    destination_unit,
+                    operator_id,
+                    reason,
+                ),
             )
-            visita_id = cursor.lastrowid
+
+            visit_id = cursor.lastrowid
             conn.commit()
 
-            registrar(
-                acao="ACESSO_NEGADO",
-                modulo="acesso",
+            record(
+                action="ACCESS_DENIED",
+                module="access",
                 payload={
-                    "visita_id": visita_id,
-                    "visitante": nome_visitante,
-                    "tipo": tipo,
-                    "unidade": unidade_destino,
-                    "motivo": motivo,
+                    "visit_id": visit_id,
+                    "visitor": visitor_name,
+                    "type": type,
+                    "unit": destination_unit,
+                    "reason": reason,
                 },
-                operador_id=operador_id,
+                operator_id=operator_id,
             )
-            return {"ok": False, "visita_id": visita_id, "mensagem": motivo}
+
+            return {
+                "ok": False,
+                "visit_id": visit_id,
+                "message": reason,
+            }
+
     finally:
         conn.close()
 
-def registrar_saida(visita_id: int, operador_id: int) -> dict:
+
+def register_checkout(visit_id: int, operator_id: int) -> dict:
     conn = get_connection()
+
     try:
-        visita = conn.execute(
-            "SELECT * FROM visitas WHERE id = ?", (visita_id,)
+        visit = conn.execute(
+            "SELECT * FROM visits WHERE id = ?",
+            (visit_id,),
         ).fetchone()
 
-        if not visita:
-            return {"ok": False, "mensagem": "Visita não encontrada."}
-        if visita["status"] != "autorizado":
-            return {"ok": False, "mensagem": f"Status atual '{visita['status']}' não permite registrar saída."}
+        if not visit:
+            return {
+                "ok": False,
+                "message": "Visit not found.",
+            }
 
-        saida_em = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        if visit["status"] != "authorized":
+            return {
+                "ok": False,
+                "message": (
+                    f"Current status '{visit['status']}' "
+                    "does not allow checkout registration."
+                ),
+            }
+
+        checked_out_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         conn.execute(
-            "UPDATE visitas SET status = 'saida', saida_em = ? WHERE id = ?",
-            (saida_em, visita_id),
+            """
+            UPDATE visits
+            SET status = 'checked_out',
+                checked_out_at = ?
+            WHERE id = ?
+            """,
+            (checked_out_at, visit_id),
         )
+
         conn.commit()
 
-        registrar(
-            acao="SAIDA_REGISTRADA",
-            modulo="acesso",
+        record(
+            action="CHECKOUT_REGISTERED",
+            module="access",
             payload={
-                "visita_id": visita_id,
-                "visitante": visita["nome_visitante"],
-                "unidade": visita["unidade_destino"],
-                "entrada_em": visita["entrada_em"],
-                "saida_em": saida_em,
+                "visit_id": visit_id,
+                "visitor": visit["visitor_name"],
+                "unit": visit["destination_unit"],
+                "checked_in_at": visit["checked_in_at"],
+                "checked_out_at": checked_out_at,
             },
-            operador_id=operador_id,
+            operator_id=operator_id,
         )
-        return {"ok": True, "mensagem": f"Saída de '{visita['nome_visitante']}' registrada com sucesso."}
+
+        return {
+            "ok": True,
+            "message": (
+                f"Checkout for '{visit['visitor_name']}' "
+                "registered successfully."
+            ),
+        }
+
     finally:
         conn.close()
 
-def listar_visitas_ativas() -> list[dict]:
+
+def list_active_visits() -> list[dict]:
     conn = get_connection()
+
     try:
         rows = conn.execute(
             """
-            SELECT v.*, o.nome AS operador_nome
-            FROM visitas v
-            JOIN operadores o ON o.id = v.operador_id
-            WHERE v.status = 'autorizado'
-            ORDER BY v.entrada_em DESC
+            SELECT v.*, o.name AS operator_name
+            FROM visits v
+            JOIN operators o ON o.id = v.operator_id
+            WHERE v.status = 'authorized'
+            ORDER BY v.checked_in_at DESC
             """
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        return [dict(row) for row in rows]
+
     finally:
         conn.close()
 
-def listar_visitas_recentes(limite: int = 20) -> list[dict]:
+
+def list_recent_visits(limit: int = 20) -> list[dict]:
     conn = get_connection()
+
     try:
         rows = conn.execute(
             """
-            SELECT v.*, o.nome AS operador_nome
-            FROM visitas v
-            JOIN operadores o ON o.id = v.operador_id
-            ORDER BY v.criado_em DESC
+            SELECT v.*, o.name AS operator_name
+            FROM visits v
+            JOIN operators o ON o.id = v.operator_id
+            ORDER BY v.created_at DESC
             LIMIT ?
             """,
-            (limite,),
+            (limit,),
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        return [dict(row) for row in rows]
+
     finally:
         conn.close()
 
-# ── CRUD DE REGRAS ────────────────────────────────────────────────────────────
 
-def criar_regra(
-    descricao: str,
-    tipo_visita: str,
-    hora_inicio: str,
-    hora_fim: str,
-    dias_semana: str,
-    operador_id: int,
+# ── ACCESS RULE CRUD ─────────────────────────────────────────────────────────
+
+
+def create_rule(
+    description: str,
+    visitor_type: str,
+    start_time: str,
+    end_time: str,
+    weekdays: str,
+    operator_id: int,
 ) -> int:
     conn = get_connection()
+
     try:
         cursor = conn.execute(
             """
-            INSERT INTO regras_acesso
-                (descricao, tipo_visita, hora_inicio, hora_fim, dias_semana)
+            INSERT INTO access_rules
+                (description, visitor_type, start_time, end_time, weekdays)
             VALUES (?, ?, ?, ?, ?)
             """,
-            (descricao, tipo_visita, hora_inicio, hora_fim, dias_semana),
+            (
+                description,
+                visitor_type,
+                start_time,
+                end_time,
+                weekdays,
+            ),
         )
-        regra_id = cursor.lastrowid
+
+        rule_id = cursor.lastrowid
         conn.commit()
 
-        registrar(
-            acao="REGRA_CRIADA",
-            modulo="acesso",
+        record(
+            action="RULE_CREATED",
+            module="access",
             payload={
-                "regra_id": regra_id,
-                "descricao": descricao,
-                "tipo_visita": tipo_visita,
-                "hora_inicio": hora_inicio,
-                "hora_fim": hora_fim,
-                "dias_semana": dias_semana,
+                "rule_id": rule_id,
+                "description": description,
+                "visitor_type": visitor_type,
+                "start_time": start_time,
+                "end_time": end_time,
+                "weekdays": weekdays,
             },
-            operador_id=operador_id,
+            operator_id=operator_id,
         )
-        return regra_id
+
+        return rule_id
+
     finally:
         conn.close()
 
-def listar_regras() -> list[dict]:
+
+def list_rules() -> list[dict]:
     conn = get_connection()
+
     try:
-        rows = conn.execute("SELECT * FROM regras_acesso ORDER BY id").fetchall()
-        return [dict(r) for r in rows]
+        rows = conn.execute(
+            "SELECT * FROM access_rules ORDER BY id"
+        ).fetchall()
+
+        return [dict(row) for row in rows]
+
     finally:
         conn.close()
 
-def desativar_regra(regra_id: int, operador_id: int) -> bool:
+
+def deactivate_rule(rule_id: int, operator_id: int) -> bool:
     conn = get_connection()
+
     try:
-        conn.execute("UPDATE regras_acesso SET ativo = 0 WHERE id = ?", (regra_id,))
+        conn.execute(
+            "UPDATE access_rules SET active = 0 WHERE id = ?",
+            (rule_id,),
+        )
+
         conn.commit()
-        registrar(
-            acao="REGRA_DESATIVADA",
-            modulo="acesso",
-            payload={"regra_id": regra_id},
-            operador_id=operador_id,
+
+        record(
+            action="RULE_DEACTIVATED",
+            module="access",
+            payload={
+                "rule_id": rule_id,
+            },
+            operator_id=operator_id,
         )
+
         return True
+
     finally:
         conn.close()
