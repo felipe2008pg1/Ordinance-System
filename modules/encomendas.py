@@ -1,184 +1,266 @@
 """
-Módulo de Encomendas.
-Fluxo: recebimento → notificação automática → retirada com senha do morador.
-A senha de confirmação é validada pelo sistema — o operador não pode "pular" essa etapa.
+Package Management Module.
+Flow: receiving → automatic notification → pickup with the resident's password.
+The confirmation password is validated by the system — the operator cannot skip this step.
 """
 
 from datetime import datetime
 from db.database import get_connection
-from modules.auditoria import registrar
+from modules.audit_log import record
 
-def _buscar_morador(unidade: str):
+def _find_resident(unit: str):
     conn = get_connection()
+
     try:
         return conn.execute(
-            "SELECT * FROM moradores WHERE unidade = ? AND ativo = 1", (unidade,)
+            "SELECT * FROM residents WHERE unit = ? AND active = 1",
+            (unit,),
         ).fetchone()
+
     finally:
         conn.close()
 
-def _simular_notificacao(morador_nome: str, unidade: str, descricao: str, encomenda_id: int):
-    agora = datetime.now().strftime("%d/%m/%Y %H:%M")
-    print(f"\n  {'─'*55}")
-    print(f"  📦 [NOTIFICAÇÃO AUTOMÁTICA]")
-    print(f"  Para:      {morador_nome} — Unidade {unidade}")
-    print(f"  Mensagem:  Nova encomenda recebida: '{descricao}'.")
-    print(f"             Protocolo #{encomenda_id} — {agora}")
-    print(f"             Retire na portaria com sua senha de confirmação.")
-    print(f"  {'─'*55}\n")
+def _simulate_notification(
+    resident_name: str,
+    unit: str,
+    description: str,
+    package_id: int,
+):
+    current_time = datetime.now().strftime("%m/%d/%Y %H:%M")
 
-def receber_encomenda(
-    descricao: str,
-    unidade_destino: str,
-    operador_id: int,
-    codigo_rastreio: str = "",
-    remetente: str = "",
+    print(f"\n  {'─' * 55}")
+    print("  📦 [AUTOMATIC NOTIFICATION]")
+    print(f"  To:         {resident_name} — Unit {unit}")
+    print(f"  Message:    New package received: '{description}'.")
+    print(f"              Reference #{package_id} — {current_time}")
+    print("              Pick it up at the gatehouse with your confirmation password.")
+    print(f"  {'─' * 55}\n")
+
+def receive_package(
+    description: str,
+    destination_unit: str,
+    operator_id: int,
+    tracking_code: str = "",
+    sender: str = "",
 ) -> dict:
-    morador = _buscar_morador(unidade_destino)
-    if not morador:
-        return {"ok": False, "mensagem": f"Unidade '{unidade_destino}' não encontrada ou inativa."}
+    resident = _find_resident(destination_unit)
+
+    if not resident:
+        return {
+            "ok": False,
+            "message": (
+                f"Unit '{destination_unit}' not found or inactive."
+            ),
+        }
 
     conn = get_connection()
+
     try:
         cursor = conn.execute(
             """
-            INSERT INTO encomendas
-                (codigo_rastreio, descricao, remetente, unidade_destino, operador_id, status)
-            VALUES (?, ?, ?, ?, ?, 'recebida')
+            INSERT INTO packages
+                (
+                    tracking_code,
+                    description,
+                    sender,
+                    destination_unit,
+                    operator_id,
+                    status
+                )
+            VALUES (?, ?, ?, ?, ?, 'received')
             """,
-            (codigo_rastreio, descricao, remetente, unidade_destino, operador_id),
+            (
+                tracking_code,
+                description,
+                sender,
+                destination_unit,
+                operator_id,
+            ),
         )
-        enc_id = cursor.lastrowid
+
+        package_id = cursor.lastrowid
 
         conn.execute(
-            "UPDATE encomendas SET status = 'notificado' WHERE id = ?", (enc_id,)
+            "UPDATE packages SET status = 'notified' WHERE id = ?",
+            (package_id,),
         )
+
         conn.commit()
 
-        registrar(
-            acao="ENCOMENDA_RECEBIDA",
-            modulo="encomenda",
+        record(
+            action="PACKAGE_RECEIVED",
+            module="package",
             payload={
-                "encomenda_id": enc_id,
-                "descricao": descricao,
-                "unidade": unidade_destino,
-                "rastreio": codigo_rastreio,
-                "remetente": remetente,
-                "morador": morador["nome"],
+                "package_id": package_id,
+                "description": description,
+                "unit": destination_unit,
+                "tracking_code": tracking_code,
+                "sender": sender,
+                "resident": resident["name"],
             },
-            operador_id=operador_id,
+            operator_id=operator_id,
         )
 
-        _simular_notificacao(morador["nome"], unidade_destino, descricao, enc_id)
+        _simulate_notification(
+            resident["name"],
+            destination_unit,
+            description,
+            package_id,
+        )
 
         return {
             "ok": True,
-            "encomenda_id": enc_id,
-            "mensagem": f"Encomenda #{enc_id} registrada e morador notificado.",
+            "package_id": package_id,
+            "message": (
+                f"Package #{package_id} registered "
+                "and resident notified."
+            ),
         }
+
     finally:
         conn.close()
 
-def retirar_encomenda(
-    encomenda_id: int,
-    senha_confirmacao: str,
-    retirada_por: str,
-    operador_id: int,
+def pick_up_package(
+    package_id: int,
+    confirmation_password: str,
+    picked_up_by: str,
+    operator_id: int,
 ) -> dict:
     conn = get_connection()
+
     try:
-        enc = conn.execute(
-            "SELECT * FROM encomendas WHERE id = ?", (encomenda_id,)
+        package = conn.execute(
+            "SELECT * FROM packages WHERE id = ?",
+            (package_id,),
         ).fetchone()
 
-        if not enc:
-            return {"ok": False, "mensagem": "Encomenda não encontrada."}
+        if not package:
+            return {
+                "ok": False,
+                "message": "Package not found.",
+            }
 
-        if enc["status"] == "retirada":
-            return {"ok": False, "mensagem": "Esta encomenda já foi retirada."}
+        elif package["status"] == "picked_up":
+            return {
+                "ok": False,
+                "message": "This package has already been picked up.",
+            }
 
-        if enc["status"] == "recebida":
-            return {"ok": False, "mensagem": "Encomenda ainda não notificada ao morador."}
+        elif package["status"] == "received":
+            return {
+                "ok": False,
+                "message": "Package has not been notified to the resident yet.",
+            }
 
-        morador = _buscar_morador(enc["unidade_destino"])
-        if not morador:
-            return {"ok": False, "mensagem": "Morador não encontrado para validação de senha."}
+        resident = _find_resident(package["destination_unit"])
 
-        # ── VALIDAÇÃO DA SENHA (regra de negócio inviolável) ──────
+        if not resident:
+            return {
+                "ok": False,
+                "message": "Resident not found for password validation.",
+            }
 
-        if morador["senha_encomenda"] != senha_confirmacao.strip():
-            registrar(
-                acao="RETIRADA_SENHA_INVALIDA",
-                modulo="encomenda",
+        # ── PASSWORD VALIDATION (immutable business rule) ─────────
+
+        if resident["package_password"] != confirmation_password.strip():
+            record(
+                action="PACKAGE_PICKUP_INVALID_PASSWORD",
+                module="package",
                 payload={
-                    "encomenda_id": encomenda_id,
-                    "unidade": enc["unidade_destino"],
-                    "tentativa_retirada_por": retirada_por,
+                    "package_id": package_id,
+                    "unit": package["destination_unit"],
+                    "pickup_attempted_by": picked_up_by,
                 },
-                operador_id=operador_id,
+                operator_id=operator_id,
             )
-            return {"ok": False, "mensagem": "❌ Senha de confirmação inválida. Retirada NÃO autorizada."}
 
-        # Senha correta → efetua retirada
-        
-        retirada_em = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            return {
+                "ok": False,
+                "message": (
+                    "❌ Invalid confirmation password. "
+                    "Pickup NOT authorized."
+                ),
+            }
+
+        # Correct password → complete pickup
+
+        picked_up_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         conn.execute(
             """
-            UPDATE encomendas
-            SET status = 'retirada', retirada_em = ?, retirada_por = ?
+            UPDATE packages
+            SET status = 'picked_up',
+                picked_up_at = ?,
+                picked_up_by = ?
             WHERE id = ?
             """,
-            (retirada_em, retirada_por, encomenda_id),
+            (
+                picked_up_at,
+                picked_up_by,
+                package_id,
+            ),
         )
+
         conn.commit()
 
-        registrar(
-            acao="ENCOMENDA_RETIRADA",
-            modulo="encomenda",
+        record(
+            action="PACKAGE_PICKED_UP",
+            module="package",
             payload={
-                "encomenda_id": encomenda_id,
-                "unidade": enc["unidade_destino"],
-                "retirada_por": retirada_por,
-                "retirada_em": retirada_em,
+                "package_id": package_id,
+                "unit": package["destination_unit"],
+                "picked_up_by": picked_up_by,
+                "picked_up_at": picked_up_at,
             },
-            operador_id=operador_id,
+            operator_id=operator_id,
         )
+
         return {
             "ok": True,
-            "mensagem": f"✅ Encomenda #{encomenda_id} retirada com sucesso por '{retirada_por}'.",
+            "message": (
+                f"✅ Package #{package_id} successfully picked up "
+                f"by '{picked_up_by}'."
+            ),
         }
+
     finally:
         conn.close()
 
-def listar_encomendas_pendentes() -> list[dict]:
+def list_pending_packages() -> list[dict]:
     conn = get_connection()
+
     try:
         rows = conn.execute(
             """
-            SELECT e.*, o.nome AS operador_nome
-            FROM encomendas e
-            JOIN operadores o ON o.id = e.operador_id
-            WHERE e.status IN ('recebida', 'notificado')
-            ORDER BY e.recebida_em DESC
+            SELECT p.*, o.name AS operator_name
+            FROM packages p
+            JOIN operators o ON o.id = p.operator_id
+            WHERE p.status IN ('received', 'notified')
+            ORDER BY p.received_at DESC
             """
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        return [dict(row) for row in rows]
+
     finally:
         conn.close()
 
-def listar_encomendas_recentes(limite: int = 20) -> list[dict]:
+def list_recent_packages(limit: int = 20) -> list[dict]:
     conn = get_connection()
+
     try:
         rows = conn.execute(
             """
-            SELECT e.*, o.nome AS operador_nome
-            FROM encomendas e
-            JOIN operadores o ON o.id = e.operador_id
-            ORDER BY e.recebida_em DESC
+            SELECT p.*, o.name AS operator_name
+            FROM packages p
+            JOIN operators o ON o.id = p.operator_id
+            ORDER BY p.received_at DESC
             LIMIT ?
             """,
-            (limite,),
+            (limit,),
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        return [dict(row) for row in rows]
+
     finally:
         conn.close()
