@@ -1,93 +1,116 @@
 """
-Trilha de Auditoria — coração do sistema.
-Toda ação realizada no sistema passa por aqui.
-Registros são append-only: nenhum UPDATE ou DELETE é permitido (garantido via trigger SQL).
+Audit Trail — the heart of the system.
+Every action performed in the system passes through here.
+Records are append-only: no UPDATE or DELETE is allowed (enforced via SQL trigger).
 """
-
 import json
 from datetime import datetime
 from db.database import get_connection
 
-def registrar(
-    acao: str,
-    modulo: str,
+def record(
+    action: str,
+    module: str,
     payload: dict,
-    operador_id: int | None = None,
-    ip_origem: str | None = None,
+    operator_id: int | None = None,
+    source_ip: str | None = None,
 ):
     """
-    Grava um evento imutável na trilha de auditoria.
+    Records an immutable event in the audit trail.
 
     Args:
-        acao:        Descrição da ação (ex: 'ACESSO_NEGADO', 'ENCOMENDA_RECEBIDA').
-        modulo:      Pilar do sistema: 'acesso' | 'encomenda' | 'sistema' | 'operador' | 'morador'.
-        payload:     Dict com os dados relevantes do evento (serializado em JSON).
-        operador_id: ID do operador que executou a ação (None para ações automáticas do sistema).
-        ip_origem:   IP da sessão, quando disponível.
+        action:       Description of the action (e.g. 'ACCESS_DENIED', 'PACKAGE_RECEIVED').
+        module:       System pillar: 'access' | 'package' | 'system' | 'operator' | 'resident'.
+        payload:      Dict containing relevant event data (serialized as JSON).
+        operator_id:  ID of the operator who performed the action
+                      (None for automatic system actions).
+        source_ip:    Session IP address, when available.
     """
     conn = get_connection()
+
     try:
         conn.execute(
             """
-            INSERT INTO auditoria (operador_id, acao, modulo, payload_json, ip_origem)
+            INSERT INTO audit_log
+                (operator_id, action, module, payload_json, source_ip)
             VALUES (?, ?, ?, ?, ?)
             """,
             (
-                operador_id,
-                acao.upper(),
-                modulo,
-                json.dumps(payload, ensure_ascii=False, default=str),
-                ip_origem,
+                operator_id,
+                action.upper(),
+                module,
+                json.dumps(
+                    payload,
+                    ensure_ascii=False,
+                    default=str,
+                ),
+                source_ip,
             ),
         )
+
         conn.commit()
+
     finally:
         conn.close()
 
-def buscar_trilha(
-    modulo: str | None = None,
-    operador_id: int | None = None,
-    data_inicio: str | None = None,
-    data_fim: str | None = None,
-    limite: int = 50,
+def search_audit_trail(
+    module: str | None = None,
+    operator_id: int | None = None,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    limit: int = 50,
 ) -> list[dict]:
-    """Consulta a trilha de auditoria com filtros opcionais."""
+    """Queries the audit trail with optional filters."""
+
     conn = get_connection()
+
     try:
         query = """
-            SELECT a.id, a.acao, a.modulo, a.payload_json,
-                   a.ip_origem, a.registrado_em,
-                   o.nome AS operador_nome, o.login AS operador_login
-            FROM auditoria a
-            LEFT JOIN operadores o ON o.id = a.operador_id
+            SELECT a.id,
+                   a.action,
+                   a.module,
+                   a.payload_json,
+                   a.source_ip,
+                   a.recorded_at,
+                   o.name AS operator_name,
+                   o.username AS operator_username
+            FROM audit_log a
+            LEFT JOIN operators o ON o.id = a.operator_id
             WHERE 1=1
         """
+
         params = []
 
-        if modulo:
-            query += " AND a.modulo = ?"
-            params.append(modulo)
-        if operador_id:
-            query += " AND a.operador_id = ?"
-            params.append(operador_id)
-        if data_inicio:
-            query += " AND a.registrado_em >= ?"
-            params.append(data_inicio)
-        if data_fim:
-            query += " AND a.registrado_em <= ?"
-            params.append(data_fim + " 23:59:59")
+        if module:
+            query += " AND a.module = ?"
+            params.append(module)
+
+        elif operator_id:
+            query += " AND a.operator_id = ?"
+            params.append(operator_id)
+
+        elif start_date:
+            query += " AND a.recorded_at >= ?"
+            params.append(start_date)
+
+        elif end_date:
+            query += " AND a.recorded_at <= ?"
+            params.append(end_date + " 23:59:59")
 
         query += " ORDER BY a.id DESC LIMIT ?"
-        params.append(limite)
-
+        params.append(limit)
         rows = conn.execute(query, params).fetchall()
-        return [dict(r) for r in rows]
+        return [dict(row) for row in rows]
+
     finally:
         conn.close()
 
-def total_eventos() -> int:
+def get_total_events() -> int:
     conn = get_connection()
+
     try:
-        return conn.execute("SELECT COUNT(*) FROM auditoria").fetchone()[0]
+        return conn.execute(
+            "SELECT COUNT(*) FROM audit_log"
+        ).fetchone()[0]
+
     finally:
         conn.close()
