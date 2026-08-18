@@ -1,166 +1,302 @@
 """
-Módulo de Autenticação e Gestão de Operadores/Moradores.
-Usa SHA-256 para hash de senhas (sem dependências externas).
+Authentication and Operator/Resident Management Module.
+Uses SHA-256 for password hashing (no external dependencies).
 """
 
 import hashlib
 from db.database import get_connection
-from modules.auditoria import registrar
+from modules.audit_log import record
 
-def _hash_senha(senha: str) -> str:
-    return hashlib.sha256(senha.encode()).hexdigest()
+def _hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
 
-# ── AUTENTICAÇÃO ──────────────────────────────────────────────────────────────
+# ── AUTHENTICATION ────────────────────────────────────────────────────────────
 
-def autenticar(login: str, senha: str) -> dict | None:
-    """Retorna dict do operador se credenciais válidas, None caso contrário."""
+def authenticate(username: str, password: str) -> dict | None:
+    """Returns the operator dict if credentials are valid, None otherwise."""
     conn = get_connection()
+
     try:
-        op = conn.execute(
-            "SELECT * FROM operadores WHERE login = ? AND ativo = 1", (login,)
+        operator = conn.execute(
+            "SELECT * FROM operators WHERE username = ? AND active = 1",
+            (username,),
         ).fetchone()
-        if op and op["senha_hash"] == _hash_senha(senha):
-            registrar(
-                acao="LOGIN_OK",
-                modulo="sistema",
-                payload={"login": login, "perfil": op["perfil"]},
-                operador_id=op["id"],
+
+        if operator and operator["password_hash"] == _hash_password(password):
+            record(
+                action="LOGIN_SUCCESS",
+                module="system",
+                payload={
+                    "username": username,
+                    "role": operator["role"],
+                },
+                operator_id=operator["id"],
             )
-            return dict(op)
 
-        registrar(
-            acao="LOGIN_FALHOU",
-            modulo="sistema",
-            payload={"login": login, "motivo": "credenciais inválidas"},
+            return dict(operator)
+
+        record(
+            action="LOGIN_FAILED",
+            module="system",
+            payload={
+                "username": username,
+                "reason": "invalid credentials",
+            },
         )
+
         return None
+
     finally:
         conn.close()
 
-# ── OPERADORES ────────────────────────────────────────────────────────────────
+# ── OPERATORS ────────────────────────────────────────────────────────────────
 
-def criar_operador(
-    nome: str,
-    login: str,
-    senha: str,
-    perfil: str,
-    criado_por_id: int,
+def create_operator(
+    name: str,
+    username: str,
+    password: str,
+    role: str,
+    created_by_id: int,
 ) -> dict:
     conn = get_connection()
+
     try:
-        existente = conn.execute(
-            "SELECT id FROM operadores WHERE login = ?", (login,)
+        existing = conn.execute(
+            "SELECT id FROM operators WHERE username = ?",
+            (username,),
         ).fetchone()
-        if existente:
-            return {"ok": False, "mensagem": f"Login '{login}' já está em uso."}
+
+        if existing:
+            return {
+                "ok": False,
+                "message": f"Username '{username}' is already in use.",
+            }
 
         cursor = conn.execute(
-            "INSERT INTO operadores (nome, login, senha_hash, perfil) VALUES (?, ?, ?, ?)",
-            (nome, login, _hash_senha(senha), perfil),
+            """
+            INSERT INTO operators
+                (name, username, password_hash, role)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                name,
+                username,
+                _hash_password(password),
+                role,
+            ),
         )
-        op_id = cursor.lastrowid
+
+        operator_id = cursor.lastrowid
         conn.commit()
 
-        registrar(
-            acao="OPERADOR_CRIADO",
-            modulo="operador",
-            payload={"novo_operador_id": op_id, "login": login, "perfil": perfil},
-            operador_id=criado_por_id,
+        record(
+            action="OPERATOR_CREATED",
+            module="operator",
+            payload={
+                "new_operator_id": operator_id,
+                "username": username,
+                "role": role,
+            },
+            operator_id=created_by_id,
         )
-        return {"ok": True, "operador_id": op_id, "mensagem": f"Operador '{nome}' criado com sucesso."}
+
+        return {
+            "ok": True,
+            "operator_id": operator_id,
+            "message": f"Operator '{name}' created successfully.",
+        }
+
     finally:
         conn.close()
 
-def listar_operadores() -> list[dict]:
+def list_operators() -> list[dict]:
     conn = get_connection()
+
     try:
         rows = conn.execute(
-            "SELECT id, nome, login, perfil, ativo, criado_em FROM operadores ORDER BY nome"
+            """
+            SELECT id,
+                   name,
+                   username,
+                   role,
+                   active,
+                   created_at
+            FROM operators
+            ORDER BY name
+            """
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        return [dict(row) for row in rows]
+
     finally:
         conn.close()
 
-def desativar_operador(op_id: int, admin_id: int) -> dict:
+def deactivate_operator(operator_id: int, admin_id: int) -> dict:
     conn = get_connection()
-    try:
-        op = conn.execute("SELECT * FROM operadores WHERE id = ?", (op_id,)).fetchone()
-        if not op:
-            return {"ok": False, "mensagem": "Operador não encontrado."}
-        if op["id"] == admin_id:
-            return {"ok": False, "mensagem": "Você não pode desativar sua própria conta."}
 
-        conn.execute("UPDATE operadores SET ativo = 0 WHERE id = ?", (op_id,))
+    try:
+        operator = conn.execute(
+            "SELECT * FROM operators WHERE id = ?",
+            (operator_id,),
+        ).fetchone()
+
+        if not operator:
+            return {
+                "ok": False,
+                "message": "Operator not found.",
+            }
+
+        elif operator["id"] == admin_id:
+            return {
+                "ok": False,
+                "message": "You cannot deactivate your own account.",
+            }
+
+        conn.execute(
+            "UPDATE operators SET active = 0 WHERE id = ?",
+            (operator_id,),
+        )
+
         conn.commit()
 
-        registrar(
-            acao="OPERADOR_DESATIVADO",
-            modulo="operador",
-            payload={"operador_id": op_id, "login": op["login"]},
-            operador_id=admin_id,
+        record(
+            action="OPERATOR_DEACTIVATED",
+            module="operator",
+            payload={
+                "operator_id": operator_id,
+                "username": operator["username"],
+            },
+            operator_id=admin_id,
         )
-        return {"ok": True, "mensagem": f"Operador '{op['nome']}' desativado."}
+
+        return {
+            "ok": True,
+            "message": f"Operator '{operator['name']}' deactivated.",
+        }
+
     finally:
         conn.close()
 
-# ── MORADORES ─────────────────────────────────────────────────────────────────
+# ── RESIDENTS ────────────────────────────────────────────────────────────────
 
-def criar_morador(
-    nome: str,
-    unidade: str,
-    senha_encomenda: str,
-    operador_id: int,
-    telefone: str = "",
+def create_resident(
+    name: str,
+    unit: str,
+    package_password: str,
+    operator_id: int,
+    phone: str = "",
 ) -> dict:
     conn = get_connection()
+
     try:
-        existente = conn.execute(
-            "SELECT id FROM moradores WHERE unidade = ?", (unidade,)
+        existing = conn.execute(
+            "SELECT id FROM residents WHERE unit = ?",
+            (unit,),
         ).fetchone()
-        if existente:
-            return {"ok": False, "mensagem": f"Unidade '{unidade}' já cadastrada."}
+
+        if existing:
+            return {
+                "ok": False,
+                "message": f"Unit '{unit}' is already registered.",
+            }
 
         cursor = conn.execute(
-            "INSERT INTO moradores (nome, unidade, telefone, senha_encomenda) VALUES (?, ?, ?, ?)",
-            (nome, unidade, telefone, senha_encomenda),
+            """
+            INSERT INTO residents
+                (name, unit, phone, package_password)
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                name,
+                unit,
+                phone,
+                package_password,
+            ),
         )
-        mor_id = cursor.lastrowid
+
+        resident_id = cursor.lastrowid
         conn.commit()
 
-        registrar(
-            acao="MORADOR_CRIADO",
-            modulo="morador",
-            payload={"morador_id": mor_id, "nome": nome, "unidade": unidade},
-            operador_id=operador_id,
+        record(
+            action="RESIDENT_CREATED",
+            module="resident",
+            payload={
+                "resident_id": resident_id,
+                "name": name,
+                "unit": unit,
+            },
+            operator_id=operator_id,
         )
-        return {"ok": True, "morador_id": mor_id, "mensagem": f"Morador '{nome}' — Unidade {unidade} cadastrado."}
+
+        return {
+            "ok": True,
+            "resident_id": resident_id,
+            "message": (
+                f"Resident '{name}' — Unit {unit} registered successfully."
+            ),
+        }
+
     finally:
         conn.close()
 
-def listar_moradores() -> list[dict]:
+def list_residents() -> list[dict]:
     conn = get_connection()
+
     try:
         rows = conn.execute(
-            "SELECT id, nome, unidade, telefone, ativo, criado_em FROM moradores ORDER BY unidade"
+            """
+            SELECT id,
+                   name,
+                   unit,
+                   phone,
+                   active,
+                   created_at
+            FROM residents
+            ORDER BY unit
+            """
         ).fetchall()
-        return [dict(r) for r in rows]
+
+        return [dict(row) for row in rows]
+
     finally:
         conn.close()
 
-def desativar_morador(mor_id: int, operador_id: int) -> dict:
+def deactivate_resident(resident_id: int, operator_id: int) -> dict:
     conn = get_connection()
+
     try:
-        mor = conn.execute("SELECT * FROM moradores WHERE id = ?", (mor_id,)).fetchone()
-        if not mor:
-            return {"ok": False, "mensagem": "Morador não encontrado."}
-        conn.execute("UPDATE moradores SET ativo = 0 WHERE id = ?", (mor_id,))
-        conn.commit()
-        registrar(
-            acao="MORADOR_DESATIVADO",
-            modulo="morador",
-            payload={"morador_id": mor_id, "unidade": mor["unidade"]},
-            operador_id=operador_id,
+        resident = conn.execute(
+            "SELECT * FROM residents WHERE id = ?",
+            (resident_id,),
+        ).fetchone()
+
+        if not resident:
+            return {
+                "ok": False,
+                "message": "Resident not found.",
+            }
+
+        conn.execute(
+            "UPDATE residents SET active = 0 WHERE id = ?",
+            (resident_id,),
         )
-        return {"ok": True, "mensagem": f"Morador '{mor['nome']}' desativado."}
+
+        conn.commit()
+
+        record(
+            action="RESIDENT_DEACTIVATED",
+            module="resident",
+            payload={
+                "resident_id": resident_id,
+                "unit": resident["unit"],
+            },
+            operator_id=operator_id,
+        )
+
+        return {
+            "ok": True,
+            "message": f"Resident '{resident['name']}' deactivated.",
+        }
+
     finally:
         conn.close()
