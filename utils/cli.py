@@ -1,144 +1,259 @@
 """
-Utilitários de interface CLI: cores ANSI, tabelas, prompts padronizados.
+CLI interface utilities: ANSI colors, tables, and standardized prompts.
 """
 
 import os
 import json
 from datetime import datetime
 
-
-# ── CORES ANSI ────────────────────────────────────────────────────────────────
+# ── ANSI COLORS ───────────────────────────────────────────────────────────────
 class C:
-    RESET  = "\033[0m"
-    BOLD   = "\033[1m"
-    DIM    = "\033[2m"
-    RED    = "\033[91m"
-    GREEN  = "\033[92m"
-    YELLOW = "\033[93m"
-    BLUE   = "\033[94m"
-    MAGENTA= "\033[95m"
-    CYAN   = "\033[96m"
-    WHITE  = "\033[97m"
-    GRAY   = "\033[90m"
+    RESET   = "\033[0m"
+    BOLD    = "\033[1m"
+    DIM     = "\033[2m"
+    RED     = "\033[91m"
+    GREEN   = "\033[92m"
+    YELLOW  = "\033[93m"
+    BLUE    = "\033[94m"
+    MAGENTA = "\033[95m"
+    CYAN    = "\033[96m"
+    WHITE   = "\033[97m"
+    GRAY    = "\033[90m"
 
     @staticmethod
-    def ok(msg):    return f"{C.GREEN}✓ {msg}{C.RESET}"
-    @staticmethod
-    def erro(msg):  return f"{C.RED}✗ {msg}{C.RESET}"
-    @staticmethod
-    def aviso(msg): return f"{C.YELLOW}⚠ {msg}{C.RESET}"
-    @staticmethod
-    def info(msg):  return f"{C.CYAN}ℹ {msg}{C.RESET}"
+    def ok(message):
+        return f"{C.GREEN}✓ {message}{C.RESET}"
 
+    @staticmethod
+    def error(message):
+        return f"{C.RED}✗ {message}{C.RESET}"
 
-def limpar_tela():
+    @staticmethod
+    def warning(message):
+        return f"{C.YELLOW}⚠ {message}{C.RESET}"
+
+    @staticmethod
+    def info(message):
+        return f"{C.CYAN}ℹ {message}{C.RESET}"
+
+def clear_screen():
     os.system("cls" if os.name == "nt" else "clear")
 
+def header(title: str, subtitle: str = ""):
+    width = 60
 
-def cabecalho(titulo: str, subtitulo: str = ""):
-    largura = 60
-    print(f"\n{C.BLUE}{'═'*largura}{C.RESET}")
-    print(f"{C.BOLD}{C.WHITE}  🏢 PORTARIA — {titulo.upper()}{C.RESET}")
-    if subtitulo:
-        print(f"{C.GRAY}  {subtitulo}{C.RESET}")
-    print(f"{C.BLUE}{'═'*largura}{C.RESET}\n")
+    print(f"\n{C.BLUE}{'═' * width}{C.RESET}")
+    print(
+        f"{C.BOLD}{C.WHITE}  🏢 GATEHOUSE — "
+        f"{title.upper()}{C.RESET}"
+    )
 
+    if subtitle:
+        print(f"{C.GRAY}  {subtitle}{C.RESET}")
 
-def separador(label: str = ""):
+    print(f"{C.BLUE}{'═' * width}{C.RESET}\n")
+
+def separator(label: str = ""):
     if label:
-        print(f"\n{C.DIM}── {label} {'─'*(50-len(label))}{C.RESET}")
+        print(
+            f"\n{C.DIM}── {label} "
+            f"{'─' * (50 - len(label))}{C.RESET}"
+        )
+
     else:
-        print(f"{C.DIM}{'─'*55}{C.RESET}")
+        print(f"{C.DIM}{'─' * 55}{C.RESET}")
 
+def pause():
+    input(
+        f"\n{C.GRAY}  Press ENTER to continue...{C.RESET}"
+    )
 
-def pausar():
-    input(f"\n{C.GRAY}  Pressione ENTER para continuar...{C.RESET}")
+def confirm(question: str) -> bool:
+    response = input(
+        f"\n{C.YELLOW}  {question} [y/N]: {C.RESET}"
+    ).strip().lower()
 
+    return response == "y"
 
-def confirmar(pergunta: str) -> bool:
-    resp = input(f"\n{C.YELLOW}  {pergunta} [s/N]: {C.RESET}").strip().lower()
-    return resp == "s"
-
-
-def pedir(label: str, obrigatorio: bool = True, oculto: bool = False) -> str:
+def prompt(
+    label: str,
+    required: bool = True,
+    hidden: bool = False,
+) -> str:
     import getpass
+
     while True:
-        if oculto:
-            valor = getpass.getpass(f"  {label}: ")
+        if hidden:
+            value = getpass.getpass(f"  {label}: ")
+
         else:
-            valor = input(f"  {label}: ").strip()
-        if valor or not obrigatorio:
-            return valor
-        print(C.erro("  Campo obrigatório."))
+            value = input(f"  {label}: ").strip()
 
+        if value or not required:
+            return value
 
-def menu(titulo: str, opcoes: list[str]) -> int:
-    print(f"\n{C.BOLD}  {titulo}{C.RESET}")
-    separador()
-    for i, op in enumerate(opcoes, 1):
-        print(f"  {C.CYAN}[{i}]{C.RESET} {op}")
-    print(f"  {C.GRAY}[0]{C.RESET} Voltar / Sair")
-    separador()
+        print(C.error("  Required field."))
+
+def menu(title: str, options: list[str]) -> int:
+    print(f"\n{C.BOLD}  {title}{C.RESET}")
+    separator()
+
+    for index, option in enumerate(options, 1):
+        print(
+            f"  {C.CYAN}[{index}]{C.RESET} {option}"
+        )
+
+    print(
+        f"  {C.GRAY}[0]{C.RESET} Back / Exit"
+    )
+
+    separator()
 
     while True:
         try:
-            escolha = int(input(f"  Opção: ").strip())
-            if escolha == 0:
+            choice = int(
+                input("  Option: ").strip()
+            )
+
+            if choice == 0:
                 return -1
-            if 1 <= escolha <= len(opcoes):
-                return escolha - 1
-            print(C.aviso(f"  Escolha entre 0 e {len(opcoes)}."))
+
+            elif 1 <= choice <= len(options):
+                return choice - 1
+
+            print(
+                C.warning(
+                    f"  Choose between 0 and {len(options)}."
+                )
+            )
+
         except ValueError:
-            print(C.erro("  Digite um número válido."))
+            print(
+                C.error("  Enter a valid number.")
+            )
 
+def table(
+    columns: list[str],
+    rows: list[list],
+    column_widths: list[int] | None = None,
+):
+    """Renders a simple table in the terminal."""
 
-def tabela(colunas: list[str], linhas: list[list], col_widths: list[int] | None = None):
-    """Renderiza uma tabela simples no terminal."""
-    if not col_widths:
-        col_widths = [max(len(str(c)), max((len(str(l[i])) for l in linhas), default=0))
-                      for i, c in enumerate(colunas)]
-        col_widths = [min(w, 30) for w in col_widths]
+    if not column_widths:
+        column_widths = [
+            max(
+                len(str(column)),
+                max(
+                    (
+                        len(str(row[index]))
+                        for row in rows
+                    ),
+                    default=0,
+                ),
+            )
+            for index, column in enumerate(columns)
+        ]
 
-    sep = "  +" + "+".join("-" * (w + 2) for w in col_widths) + "+"
-    header = "  |" + "|".join(
-        f" {C.BOLD}{str(c).upper()[:w].ljust(w)}{C.RESET} "
-        for c, w in zip(colunas, col_widths)
-    ) + "|"
+        column_widths = [
+            min(width, 30)
+            for width in column_widths
+        ]
 
-    print(sep)
-    print(header)
-    print(sep)
-    for linha in linhas:
-        row = "  |" + "|".join(
-            f" {str(v)[:w].ljust(w)} " for v, w in zip(linha, col_widths)
-        ) + "|"
-        print(row)
-    print(sep)
+    separator_line = (
+        "  +"
+        + "+".join(
+            "-" * (width + 2)
+            for width in column_widths
+        )
+        + "+"
+    )
 
+    header_row = (
+        "  |"
+        + "|".join(
+            f" {C.BOLD}{str(column).upper()[:width].ljust(width)}{C.RESET} "
+            for column, width in zip(
+                columns,
+                column_widths,
+            )
+        )
+        + "|"
+    )
 
-def exibir_json_formatado(dados: dict | str, titulo: str = ""):
-    """Exibe um payload JSON de forma legível no terminal."""
-    if titulo:
-        print(f"\n  {C.BOLD}{titulo}{C.RESET}")
-    if isinstance(dados, str):
+    print(separator_line)
+    print(header_row)
+    print(separator_line)
+
+    for row in rows:
+        formatted_row = (
+            "  |"
+            + "|".join(
+                f" {str(value)[:width].ljust(width)} "
+                for value, width in zip(
+                    row,
+                    column_widths,
+                )
+            )
+            + "|"
+        )
+
+        print(formatted_row)
+
+    print(separator_line)
+
+def display_formatted_json(
+    data: dict | str,
+    title: str = "",
+):
+    """Displays a JSON payload in a readable format in the terminal."""
+
+    if title:
+        print(
+            f"\n  {C.BOLD}{title}{C.RESET}"
+        )
+
+    if isinstance(data, str):
         try:
-            dados = json.loads(dados)
-        except Exception:
-            print(f"  {dados}")
-            return
-    formatted = json.dumps(dados, indent=4, ensure_ascii=False, default=str)
-    for line in formatted.split("\n"):
-        print(f"  {C.GRAY}{line}{C.RESET}")
+            data = json.loads(data)
 
+        except Exception:
+            print(f"  {data}")
+            return
+
+    formatted = json.dumps(
+        data,
+        indent=4,
+        ensure_ascii=False,
+        default=str,
+    )
+
+    for line in formatted.split("\n"):
+        print(
+            f"  {C.GRAY}{line}{C.RESET}"
+        )
 
 def status_badge(status: str) -> str:
-    mapa = {
-        "autorizado": f"{C.GREEN}● autorizado{C.RESET}",
-        "negado":     f"{C.RED}✗ negado{C.RESET}",
-        "aguardando": f"{C.YELLOW}◌ aguardando{C.RESET}",
-        "saida":      f"{C.GRAY}↩ saída{C.RESET}",
-        "recebida":   f"{C.CYAN}📦 recebida{C.RESET}",
-        "notificado": f"{C.YELLOW}🔔 notificado{C.RESET}",
-        "retirada":   f"{C.GREEN}✓ retirada{C.RESET}",
+    status_map = {
+        "authorized":
+            f"{C.GREEN}● authorized{C.RESET}",
+
+        "denied":
+            f"{C.RED}✗ denied{C.RESET}",
+
+        "pending":
+            f"{C.YELLOW}◌ pending{C.RESET}",
+
+        "checked_out":
+            f"{C.GRAY}↩ checked out{C.RESET}",
+
+        "received":
+            f"{C.CYAN}📦 received{C.RESET}",
+
+        "notified":
+            f"{C.YELLOW}🔔 notified{C.RESET}",
+
+        "picked_up":
+            f"{C.GREEN}✓ picked up{C.RESET}",
     }
-    return mapa.get(status, status)
+
+    return status_map.get(status, status)
