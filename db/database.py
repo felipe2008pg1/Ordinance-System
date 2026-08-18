@@ -1,6 +1,6 @@
 """
-Módulo de conexão e inicialização do banco de dados SQLite.
-Todas as tabelas são criadas aqui, incluindo a tabela de auditoria imutável.
+SQLite database connection and initialization module.
+All tables are created here, including the immutable audit table.
 """
 
 import sqlite3
@@ -18,7 +18,7 @@ def init_db():
     conn = get_connection()
     cursor = conn.cursor()
 
-    # ── OPERADORES ────────────────────────────────────────────────
+    # ── OPERATORS ────────────────────────────────────────────────
     
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS operadores (
@@ -32,7 +32,7 @@ def init_db():
         )
     """)
 
-    # ── MORADORES ─────────────────────────────────────────────────
+    # ── RESIDENTS ─────────────────────────────────────────────────
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS moradores (
@@ -46,7 +46,7 @@ def init_db():
         )
     """)
 
-    # ── REGRAS DE ACESSO ──────────────────────────────────────────
+    # ── ACESS RULE  ──────────────────────────────────────────
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS regras_acesso (
@@ -60,7 +60,7 @@ def init_db():
         )
     """)
 
-    # ── VISITANTES / PRESTADORES ──────────────────────────────────
+    # ── VISITORS / SERVICE PROVIDERS ──────────────────────────────────
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS visitas (
@@ -79,7 +79,7 @@ def init_db():
         )
     """)
 
-    # ── ENCOMENDAS ────────────────────────────────────────────────
+    # ── ENCOMENDS ────────────────────────────────────────────────
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS encomendas (
@@ -97,7 +97,7 @@ def init_db():
         )
     """)
 
-    # ── TRILHA DE AUDITORIA (IMUTÁVEL) ────────────────────────────
+    # ── ORDINANCE TRAIL (IMUTABLE) ────────────────────────────
 
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS auditoria (
@@ -111,7 +111,7 @@ def init_db():
         )
     """)
 
-    # Trigger: impede UPDATE na auditoria
+    # Trigger: Dont allow UPDATE in auditoria
 
     cursor.execute("""
         CREATE TRIGGER IF NOT EXISTS bloqueia_update_auditoria
@@ -121,7 +121,7 @@ def init_db():
         END
     """)
 
-    # Trigger: impede DELETE na auditoria
+    # Trigger: Dont allow DELETE in auditoria
 
     cursor.execute("""
         CREATE TRIGGER IF NOT EXISTS bloqueia_delete_auditoria
