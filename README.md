@@ -1,5 +1,3 @@
-## 🇺🇸 English
-
 ### About the Project
 
 A Python CLI system using SQLite, focused on **strict business rules**, **data immutability**, and **full traceability** of every action performed at the gatehouse of condominiums or companies.
