@@ -75,17 +75,23 @@ The fundamental principle is simple:
 ## 📁 Project Structure
 
 ```text
-system/
-├── main.py                  # Entry point — CLI interface
+Ordinance-System/
 ├── db/
-│   └── database.py          # SQLite schema + connection + immutability triggers
+│   ├── __init__.py
+│   └── database.py
 ├── modules/
-│   ├── auth.py              # Authentication, operators and residents
-│   ├── acess.py             # Pillar 1: Intelligent Access Control
-│   ├── packages.py          # Pillar 2: Package Management Module
-│   └── audit.py             # Pillar 3: Audit Trail (append-only)
-└── utils/
-    └── cli.py               # Terminal helpers: colors, menus, tables
+│   ├── __init__.py
+│   ├── acess.py
+│   ├── audit.py
+│   ├── auth.py
+│   └── packages.py
+├── utils/
+│   ├── __init__.py
+│   └── cli.py
+├── .gitignore
+├── README.md
+├── infos.txt
+└── main.py
 ```
 
 ---
