@@ -10,9 +10,9 @@ A Python CLI system using SQLite, focused on **strict business rules**, **data i
     │   └── database.py          # SQLite schema + connection + immutability triggers
     ├── modules/
     │   ├── auth.py              # Authentication, operators and residents
-    │   ├── acesso.py            # Pillar 1: Intelligent Access Control
-    │   ├── encomendas.py        # Pillar 2: Package Management Module
-    │   └── auditoria.py         # Pillar 3: Audit Trail (append-only)
+    │   ├── acess.py            # Pillar 1: Intelligent Access Control
+    │   ├── packages.py        # Pillar 2: Package Management Module
+    │   └── audit.py         # Pillar 3: Audit Trail (append-only)
     └── utils/
         └── cli.py               # Terminal helpers: colors, menus, tables
 
