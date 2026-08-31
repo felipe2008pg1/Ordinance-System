@@ -4,7 +4,7 @@ A Python CLI system using SQLite, focused on **strict business rules**, **data i
 
 ### Project Structure
 
-    portaria/
+    system/
     ├── main.py                  # Entry point — CLI interface
     ├── db/
     │   └── database.py          # SQLite schema + connection + immutability triggers
